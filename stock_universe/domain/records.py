@@ -1,0 +1,80 @@
+"""Compatibility imports for immutable domain records.
+
+New code may import focused modules such as stock_universe.domain.plans,
+but the original stock_universe.domain.records surface remains stable.
+"""
+
+from .common import (
+    BarGrain,
+    BarGrainSpec,
+    DEFAULT_BAR_GRAIN,
+    DecisionOutcome,
+    PlanStatus,
+    Timespan,
+    bar_grain_from_parts,
+    date_range_days,
+    date_text,
+    freeze_json,
+    normalize_bar_grain,
+    parse_date,
+    stable_json_hash,
+    unfreeze_json,
+)
+from .decisions import RuleDecision
+from .evidence import (
+    AliasHistoryFact,
+    BarProbeFact,
+    EvidenceFact,
+    EvidenceLedger,
+    EvidenceRequest,
+    EvidenceSnapshot,
+    HandoffSegmentFact,
+    IdentityScanFact,
+    OmittedSegmentFact,
+    ReferenceBoundaryFact,
+    TerminalCoverageFact,
+    TickerEventFact,
+    TickerReplacementFact,
+)
+from .identity import KnownAlias, ProviderIdentitySeed, TargetIdentity
+from .plans import BackfillPlan, EvidenceNeeded
+from .requests import BackfillRequest
+from .segments import PlannedSegment
+
+__all__ = [
+    "AliasHistoryFact",
+    "BackfillPlan",
+    "BackfillRequest",
+    "BarGrain",
+    "BarGrainSpec",
+    "BarProbeFact",
+    "DEFAULT_BAR_GRAIN",
+    "DecisionOutcome",
+    "EvidenceFact",
+    "EvidenceLedger",
+    "EvidenceNeeded",
+    "EvidenceRequest",
+    "EvidenceSnapshot",
+    "HandoffSegmentFact",
+    "IdentityScanFact",
+    "KnownAlias",
+    "OmittedSegmentFact",
+    "PlanStatus",
+    "PlannedSegment",
+    "ProviderIdentitySeed",
+    "ReferenceBoundaryFact",
+    "TerminalCoverageFact",
+    "RuleDecision",
+    "TargetIdentity",
+    "TickerEventFact",
+    "TickerReplacementFact",
+    "Timespan",
+    "bar_grain_from_parts",
+    "date_range_days",
+    "date_text",
+    "freeze_json",
+    "normalize_bar_grain",
+    "parse_date",
+    "stable_json_hash",
+    "unfreeze_json",
+]

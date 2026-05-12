@@ -1,0 +1,8 @@
+#!/usr/bin/env python
+"""Source-checkout wrapper for the stock-universe CLI."""
+
+from stock_universe.cli import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
