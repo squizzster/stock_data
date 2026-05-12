@@ -203,4 +203,4 @@ def _run_adaptive_planning_trace(
 
 
 def _fact_identity(fact: EvidenceFact) -> str:
-    return json.dumps(fact.to_legacy_dict(), sort_keys=True, separators=(",", ":"))
+    return json.dumps(fact.to_payload(), sort_keys=True, separators=(",", ":"))

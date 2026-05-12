@@ -124,70 +124,38 @@ def connect_sqlite(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def _reset_incompatible_schema(conn: sqlite3.Connection) -> None:
-    views = (
-        "v_ohlcv_bars_unified",
-        "v_ohlcv_bars_hot_unified",
-    )
-    tables = (
-        "ohlcv_day_bar_quality_events",
-        "ohlcv_hour_bar_quality_events",
-        "ohlcv_minute_bar_quality_events",
-        "ohlcv_bars_day",
-        "ohlcv_bars_hour",
-        "ohlcv_bars_minute",
-        "ohlcv_bar_raw_payloads",
-        "ohlcv_bar_lineage",
-        "ohlcv_bar_scopes",
-        "market_sessions",
-        "data_sources",
-        "ticker_aliases",
-        "evidence_ledger_facts",
-        "evidence_facts",
-        "backfill_plans",
-        "ohlcv_bars",
-        "execution_receipts",
-        "execution_approvals",
-        "reference_universe_snapshots",
-        "reference_universe_updates",
-        "ohlcv_series",
-        "ohlcv_series_id_lookup",
-        "schema_metadata",
-    )
-    try:
-        present_tables = {
-            str(row[0])
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-    except sqlite3.Error:
+def _assert_fresh_or_current_schema(conn: sqlite3.Connection) -> None:
+    present_tables = {
+        str(row[0])
+        for row in conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+            """
+        ).fetchall()
+    }
+    if not present_tables:
         return
     if "schema_metadata" not in present_tables:
-        if not (present_tables & set(tables)):
-            return
-        version = ""
-    else:
-        version_row = conn.execute(
-            "SELECT value FROM schema_metadata WHERE key = 'schema_version'"
-        ).fetchone()
-        version = str(version_row[0]) if version_row else ""
-    if version == SCHEMA_VERSION:
-        return
-    conn.execute("PRAGMA foreign_keys = OFF")
-    try:
-        for view in views:
-            conn.execute(f"DROP VIEW IF EXISTS {view}")
-        for table in tables:
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
-        conn.execute("PRAGMA user_version = 0")
-        conn.commit()
-    finally:
-        conn.execute("PRAGMA foreign_keys = ON")
+        raise RuntimeError(
+            "SQLite DB is not fresh and has no stock-universe schema metadata; "
+            "delete the DB and rebuild from a clean file."
+        )
+    version_row = conn.execute(
+        "SELECT value FROM schema_metadata WHERE key = 'schema_version'"
+    ).fetchone()
+    version = str(version_row[0]) if version_row else ""
+    if version != SCHEMA_VERSION:
+        raise RuntimeError(
+            "Unsupported stock-universe SQLite schema "
+            f"{version!r}; delete the DB and rebuild with {SCHEMA_VERSION}."
+        )
 
 
 def initialize_schema(conn: sqlite3.Connection) -> None:
-    _reset_incompatible_schema(conn)
+    _assert_fresh_or_current_schema(conn)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -1595,7 +1563,7 @@ class SQLiteStockUniverseRepository:
                     "OHLCV view count errors: " + "; ".join(view_count_errors)
                 )
             else:
-                checks.append("OHLCV compatibility views preserve hot row counts")
+                checks.append("OHLCV unified views preserve hot row counts")
 
             out_of_bounds = conn.execute(
                 """
@@ -2727,7 +2695,7 @@ def _ohlcv_view_count_errors(conn: sqlite3.Connection) -> list[str]:
 
 
 def _persisted_plan_payload(plan: BackfillPlan) -> dict[str, Any]:
-    return _without_natural_key(plan.to_legacy_dict())
+    return _without_natural_key(plan.to_payload())
 
 
 def _without_natural_key(value: Any) -> Any:
@@ -2913,7 +2881,7 @@ def _upsert_series(conn: sqlite3.Connection, plan: BackfillPlan, now: str) -> No
             "TargetIdentity.ohlcv_series_id does not match central lookup: "
             f"target={plan.target.ohlcv_series_id} lookup={allocated_id} natural_key={plan.target.natural_key}"
         )
-    target = _without_natural_key(plan.target.to_legacy_dict())
+    target = _without_natural_key(plan.target.to_payload())
     conn.execute(
         """
         INSERT INTO ohlcv_series(
@@ -2955,7 +2923,7 @@ def _upsert_aliases(conn: sqlite3.Connection, plan: BackfillPlan, now: str) -> N
             }
         )
     for alias in plan.known_aliases:
-        aliases.append(alias.to_legacy_dict() | {"source": "plan.known_aliases"})
+        aliases.append(alias.to_payload() | {"source": "plan.known_aliases"})
     for segment in plan.segments:
         aliases.append(
             {
@@ -3001,7 +2969,7 @@ def _insert_evidence_facts(
     now: str,
 ) -> None:
     for fact in facts:
-        payload = fact.to_legacy_dict()
+        payload = fact.to_payload()
         persisted_payload = _without_natural_key(fact.payload_value())
         fact_hash = stable_json_hash(_without_natural_key(payload))
         series_id = _fact_series_id(fact)

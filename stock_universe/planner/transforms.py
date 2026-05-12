@@ -54,7 +54,7 @@ def _apply_ticker_replacements(
                     ),
                     valid=segment.valid,
                     validation=replacement.get("validation")
-                    or segment.to_legacy_dict().get("validation", ()),
+                    or segment.to_payload().get("validation", ()),
                     event_date=segment.event_date,
                     request_symbol=str(replacement["new_ticker"]),
                     extra=metadata,

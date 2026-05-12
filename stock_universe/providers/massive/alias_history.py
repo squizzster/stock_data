@@ -209,8 +209,8 @@ class MassiveAliasHistoryProvider:
                     "to_date": last_date,
                     "valid": True,
                     "validation": [
-                        _segment_validation_row(start_fact.to_legacy_dict(), "start"),
-                        _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+                        _segment_validation_row(start_fact.to_payload(), "start"),
+                        _segment_validation_row(end_fact.to_payload(), "end"),
                     ],
                 }
             )
@@ -618,8 +618,8 @@ class MassiveAliasHistoryProvider:
             "to_date": to_date,
             "valid": True,
             "validation": [
-                _segment_validation_row(start_fact.to_legacy_dict(), "start"),
-                _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+                _segment_validation_row(start_fact.to_payload(), "start"),
+                _segment_validation_row(end_fact.to_payload(), "end"),
             ],
         }
         return span, start_fact, end_fact

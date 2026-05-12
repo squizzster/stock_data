@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 DecisionOutcome = Literal["accept", "warn", "block", "skip", "needs_evidence"]

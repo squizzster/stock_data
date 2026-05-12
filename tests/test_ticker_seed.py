@@ -38,8 +38,8 @@ def test_ticker_seed_base_facts_preserve_reference_identity() -> None:
     )
     by_kind = {fact.kind: fact.payload_value() for fact in facts}
 
-    target = TargetIdentity.from_legacy_dict(by_kind["target_identity"])
-    request = BackfillRequest.from_legacy_dict(
+    target = TargetIdentity.from_payload(by_kind["target_identity"])
+    request = BackfillRequest.from_payload(
         target.ohlcv_series_id, by_kind["backfill_request"]
     )
 
@@ -83,10 +83,10 @@ def test_ticker_seed_keeps_alphabet_share_classes_separate() -> None:
         to_date="2024-01-31",
     )
 
-    goog_target = TargetIdentity.from_legacy_dict(
+    goog_target = TargetIdentity.from_payload(
         _payload_by_kind(goog)["target_identity"]
     )
-    googl_target = TargetIdentity.from_legacy_dict(
+    googl_target = TargetIdentity.from_payload(
         _payload_by_kind(googl)["target_identity"]
     )
 
@@ -123,10 +123,10 @@ def test_ticker_seed_keeps_cik_only_candidates_provisional_and_separate() -> Non
         to_date="2024-01-31",
     )
 
-    first_target = TargetIdentity.from_legacy_dict(
+    first_target = TargetIdentity.from_payload(
         _payload_by_kind(first)["target_identity"]
     )
-    second_target = TargetIdentity.from_legacy_dict(
+    second_target = TargetIdentity.from_payload(
         _payload_by_kind(second)["target_identity"]
     )
 

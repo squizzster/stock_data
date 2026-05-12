@@ -24,19 +24,19 @@ def test_pressure_manifest_records_report_summary(tmp_path: Path) -> None:
                 "results": [
                     {
                         "status": "ok",
-                        "fixture": "a.json",
+                        "input": "a",
                         "request_count": 2,
                         "series_id": 1,
                     },
                     {
                         "status": "ok",
-                        "fixture": "b.json",
+                        "input": "b",
                         "request_count": 7,
                         "series_id": 2,
                     },
                     {
                         "status": "skipped",
-                        "fixture": "c.json",
+                        "input": "c",
                         "planning_request_count": 4,
                         "series_id": 3,
                     },
@@ -49,7 +49,7 @@ def test_pressure_manifest_records_report_summary(tmp_path: Path) -> None:
     manifest = build_pressure_run_manifest(
         report_path=report_path,
         cohort="unit-3",
-        command=["python", "scripts/live_sqlite_backfill.py", "--strict"],
+        command=["./stock_universe.cli", "backfill", "--strict"],
         db_path=tmp_path / "stock.sqlite",
         generated_at_utc="2026-05-07T00:00:00+00:00",
         repo_root=tmp_path,
@@ -76,7 +76,7 @@ def test_pressure_manifest_records_report_summary(tmp_path: Path) -> None:
     assert manifest["request_efficiency"]["max_observed_request_count"] == 7
     assert (
         manifest["request_efficiency"]["top_observed_request_counts"][0]["input"]
-        == "b.json"
+        == "b"
     )
     assert (
         manifest["request_efficiency"]["top_observed_request_counts"][0][
@@ -106,7 +106,7 @@ def test_known_pressure_cohort_plan_defines_scale_out_success_factors() -> None:
     assert "each receipt has a durable approval" in baseline["success_factors"]
     assert expansion["target_size"] == 100
     assert (
-        "new failures become fixtures or typed evidence gaps"
+        "new failures become typed regression cases or typed evidence gaps"
         in expansion["success_factors"]
     )
 

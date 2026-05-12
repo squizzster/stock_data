@@ -22,11 +22,7 @@ from stock_universe.cli_runtime import (
     silence_stdout,
 )
 from stock_universe.defaults import DEFAULT_MAX_ROUNDS
-from stock_universe.domain import BackfillPlan, EvidenceNeeded, normalize_bar_grain
-from stock_universe.evidence import (
-    StaticBackfillEvidenceSource,
-    ledger_from_legacy_plan,
-)
+from stock_universe.domain import BackfillPlan, normalize_bar_grain
 from stock_universe.executors import ExecutionApproval, execute_live_bar_backfill
 from stock_universe.paths import canonical_db_text
 from stock_universe.planner import plan_backfill
@@ -34,7 +30,7 @@ from stock_universe.providers import MassiveProviderConfig, MassiveReadOnlyClien
 from stock_universe.progress import emit_cli_progress, emit_stderr_progress
 from stock_universe.quality_audit import ISSUE_CATEGORIES, quality_audit
 from stock_universe.quality_repair import repair_missing_execution_receipts
-from stock_universe.reports import legacy_plan_dict, render_backfill_plan_markdown
+from stock_universe.reports import render_backfill_plan_markdown
 from stock_universe.storage import (
     SQLiteStockUniverseRepository,
     connect_readonly_sqlite,
@@ -55,10 +51,8 @@ from stock_universe.workflows import (
     execute_catch_up_plan,
     fetch_massive_reference_universe,
     live_identity_search,
-    live_dry_run_base_facts_from_legacy_plan,
     massive_live_source_from_ticker,
     massive_live_source_from_series_id,
-    massive_live_dry_run_source_from_legacy_plan,
     reconcile_catch_up_run,
     request_catch_up_stop,
     run_backfill_source_dry_run_trace,
@@ -155,7 +149,7 @@ def _parser(*, prog: str = "stock-universe") -> argparse.ArgumentParser:
               {prog} xctx examples
                   Get runnable examples for the xctx learning loop.
 
-              {prog} xctx dry-run --fixture tests/fixtures/legacy_plans/simple_current_sfbc.json
+              {prog} xctx dry-run --ohlcv-series-id 1
                   Rehearse planning without mutation.
 
             Safety boundary:
@@ -170,16 +164,8 @@ def _parser(*, prog: str = "stock-universe") -> argparse.ArgumentParser:
     subcommands.add_parser(
         "xctx",
         help="Executable Context protocol plane for agent discovery and workflow rehearsal.",
-        description="Use xctx subcommands to discover, validate, dry-run, repair, and compose workflows.",
+        description="Use xctx subcommands to discover, dry-run, inspect, audit, and compose workflows.",
     )
-
-    inspect_plan = subcommands.add_parser(
-        "inspect-plan", help="Inspect a fixture-seeded plan without live reads."
-    )
-    inspect_plan.add_argument(
-        "--fixture", required=True, help="Legacy plan fixture/input JSON."
-    )
-    inspect_plan.set_defaults(func=_inspect_plan)
 
     identity_search = subcommands.add_parser(
         "identity-search",
@@ -248,11 +234,8 @@ def _parser(*, prog: str = "stock-universe") -> argparse.ArgumentParser:
     _add_progress_args(reference_universe)
     reference_universe.set_defaults(func=_update_reference_universe)
 
-    dry_run = subcommands.add_parser(
-        "dry-run", help="Run a fixture or live planning dry-run."
-    )
+    dry_run = subcommands.add_parser("dry-run", help="Run a live planning dry-run.")
     dry_run_input = dry_run.add_mutually_exclusive_group(required=True)
-    dry_run_input.add_argument("--fixture", help="Legacy plan fixture/input JSON.")
     dry_run_input.add_argument(
         "--ticker", help="Resolve a live Massive ticker into seed facts."
     )
@@ -263,7 +246,6 @@ def _parser(*, prog: str = "stock-universe") -> argparse.ArgumentParser:
         type=int,
         help="Load a selected reference-universe OHLCV series ID from --db.",
     )
-    dry_run.add_argument("--source", choices=("fixture", "live"), default=None)
     dry_run.add_argument(
         "--db",
         default=canonical_db_text(),
@@ -287,24 +269,17 @@ def _parser(*, prog: str = "stock-universe") -> argparse.ArgumentParser:
         help="Use the latest DB reference snapshot on or before this date.",
     )
     dry_run.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
-    dry_run.add_argument("--legacy-json-out", default=None)
     dry_run.add_argument("--markdown-out", default=None)
     dry_run.set_defaults(func=_dry_run)
 
     backfill = subcommands.add_parser(
         "backfill",
-        help="Execute approved live bars for fixture or ticker-seeded plans.",
+        help="Execute approved live bars for ticker or OHLCV-series selections.",
     )
     backfill.add_argument(
         "--db",
         default=canonical_db_text(),
         help="SQLite database path. Defaults to the canonical universe DB.",
-    )
-    backfill.add_argument(
-        "--fixture",
-        action="append",
-        default=[],
-        help="Legacy plan fixture/input JSON. May repeat.",
     )
     backfill.add_argument(
         "--ticker",
@@ -420,8 +395,25 @@ def _parser(*, prog: str = "stock-universe") -> argparse.ArgumentParser:
         default=None,
         help="Use latest DB reference snapshots on or before this date.",
     )
-    reference_batch.add_argument("--limit", type=int, default=25)
+    reference_batch.add_argument(
+        "--limit",
+        "--page-size",
+        dest="limit",
+        type=int,
+        default=25,
+        help=(
+            "Bounded selection size. With --all-pages, this is the internal page size."
+        ),
+    )
     reference_batch.add_argument("--offset", type=int, default=0)
+    reference_batch.add_argument(
+        "--all-pages",
+        action="store_true",
+        help=(
+            "Internally page through every matching persisted OHLCV series. "
+            "--page-size/--limit is used as the page size."
+        ),
+    )
     reference_batch.add_argument(
         "--api-key",
         default=None,
@@ -941,17 +933,6 @@ def _result_counts(results: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-def _inspect_plan(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> dict[str, Any]:
-    legacy = _load_fixture(args.fixture)
-    result = plan_backfill(ledger_from_legacy_plan(legacy).snapshot())
-    envelope = result_envelope("stock-universe inspect-plan", result)
-    if isinstance(result, BackfillPlan):
-        envelope["summary"] = _plan_summary(result)
-    return envelope
-
-
 def _identity_search(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, Any]:
@@ -1140,7 +1121,6 @@ def _update_reference_universe(
 def _dry_run(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, Any]:
-    source_name = _dry_run_source_name(args)
     _validate_bar_grain_arg(args)
     capture_dir = Path(args.capture_dir) if args.capture_dir else None
     client = None
@@ -1180,27 +1160,13 @@ def _dry_run(
         except (sqlite3.Error, ValueError) as exc:
             raise CliError(str(exc)) from exc
         selected_identity = _reference_snapshot_identity_payload(snapshot)
-    else:
-        legacy = _load_fixture(args.fixture)
-        if source_name == "live":
-            api_key = _api_key(args, parser)
-            source, client = massive_live_dry_run_source_from_legacy_plan(
-                legacy,
-                api_key=api_key,
-                base_url=args.base_url,
-                capture_dir=capture_dir,
-            )
-        else:
-            source = StaticBackfillEvidenceSource.from_legacy_plan(
-                legacy, include_candidate_segments=False
-            )
     trace = run_backfill_source_dry_run_trace(source, max_rounds=args.max_rounds)
     envelope = result_envelope(
-        f"stock-universe dry-run:{_dry_run_command_suffix(args, source_name)}",
+        f"stock-universe dry-run:{_dry_run_command_suffix(args)}",
         trace.result,
     )
     envelope["effects"] = {
-        "will_read": _planned_reads(args, source_name),
+        "will_read": _planned_reads(args),
         "will_write": _planned_writes(args),
         "did_write": _captured_raw_files(capture_dir),
     }
@@ -1214,31 +1180,20 @@ def _dry_run(
     return envelope
 
 
-def _dry_run_source_name(args: argparse.Namespace) -> str:
-    source_name = args.source or (
-        "live" if args.ticker or args.ohlcv_series_id is not None else "fixture"
-    )
-    if args.ticker and source_name != "live":
-        raise CliError("ticker dry-run requires --source live or no --source")
-    if args.ohlcv_series_id is not None and source_name != "live":
-        raise CliError("OHLCV series ID dry-run requires --source live or no --source")
-    return source_name
-
-
-def _dry_run_command_suffix(args: argparse.Namespace, source_name: str) -> str:
+def _dry_run_command_suffix(args: argparse.Namespace) -> str:
     if args.ticker:
         return "live-ticker"
     if args.ohlcv_series_id is not None:
         return "live-ohlcv-series-id"
-    return source_name
+    return "live"
 
 
 def _backfill(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, Any]:
-    if not args.fixture and not args.ticker and not args.ohlcv_series_id:
+    if not args.ticker and not args.ohlcv_series_id:
         raise CliError(
-            "backfill requires at least one --fixture, --ticker, or --ohlcv-series-id"
+            "backfill requires at least one --ticker or --ohlcv-series-id"
         )
     _validate_bar_grain_arg(args)
     _validate_progress_args(args)
@@ -1246,16 +1201,6 @@ def _backfill(
     repository = SQLiteStockUniverseRepository(args.db)
     repository.ensure_schema()
     work_items: list[tuple[str, str, Any]] = []
-    work_items.extend(
-        (
-            "fixture",
-            str(path),
-            lambda path=path: _execute_one_fixture(
-                Path(path), args, api_key, repository
-            ),
-        )
-        for path in args.fixture
-    )
     work_items.extend(
         (
             "ticker",
@@ -1324,20 +1269,19 @@ def _backfill_reference_batch(
     security_types = _reference_batch_security_types(args)
     repository = SQLiteStockUniverseRepository(args.db)
     try:
-        snapshots, total_available = repository.reference_snapshots_for_batch(
-            exchange=args.exchange,
-            market=args.market,
+        pages, total_available = _reference_batch_pages(
+            repository=repository,
+            args=args,
             security_types=security_types,
             active=active,
-            as_of_date=args.identity_as_of_date,
-            series_ids=args.ohlcv_series_id,
-            limit=args.limit,
-            offset=args.offset,
         )
     except ValueError as exc:
         raise CliError(str(exc)) from exc
-    pending_count = max(total_available - args.offset - len(snapshots), 0)
-    pending_preview = ()
+    snapshots = tuple(snapshot for page in pages for snapshot in page["snapshots"])
+    pending_count = (
+        0 if args.all_pages else max(total_available - args.offset - len(snapshots), 0)
+    )
+    pending_preview: tuple[Any, ...] = ()
     if pending_count:
         pending_preview, _ = repository.reference_snapshots_for_batch(
             exchange=args.exchange,
@@ -1362,21 +1306,31 @@ def _backfill_reference_batch(
             summary_seconds=args.summary_seconds,
             total_inputs=len(snapshots),
         )
-        work_items = [
-            (
-                "ohlcv_series_id",
-                str(snapshot.ohlcv_series_id),
-                lambda snapshot=snapshot: _execute_one_series_id(
-                    snapshot.ohlcv_series_id, args, api_key, repository
-                ),
+        if args.all_pages:
+            results = _execute_reference_batch_pages(
+                progress=progress,
+                pages=pages,
+                args=args,
+                api_key=api_key,
+                repository=repository,
             )
-            for snapshot in snapshots
-        ]
-        results = _execute_progress_work_items(progress, work_items)
+        else:
+            work_items = [
+                (
+                    "ohlcv_series_id",
+                    str(snapshot.ohlcv_series_id),
+                    lambda snapshot=snapshot: _execute_one_series_id(
+                        snapshot.ohlcv_series_id, args, api_key, repository
+                    ),
+                )
+                for snapshot in snapshots
+            ]
+            results = _execute_progress_work_items(progress, work_items)
         progress.emit(
             "summary",
             "validating reference-batch database",
             counts=_result_counts(results),
+            page_count=len(pages),
         )
         validation = repository.validate()
         final_counts = _result_counts(results)
@@ -1384,6 +1338,7 @@ def _backfill_reference_batch(
             "finished",
             "reference-batch backfill finished",
             counts=final_counts,
+            page_count=len(pages),
             ok=validation.ok
             and final_counts["skipped"] == 0
             and final_counts["error"] == 0,
@@ -1401,11 +1356,13 @@ def _backfill_reference_batch(
             "started",
             "reference-batch backfill started",
             counts=_result_counts(results),
+            page_count=len(pages),
         )
         progress.emit(
             "finished",
             "reference-batch backfill finished",
             counts=_result_counts(results),
+            page_count=len(pages),
             ok=False,
         )
 
@@ -1415,6 +1372,8 @@ def _backfill_reference_batch(
         "pending": pending_count,
         "offset": args.offset,
         "limit": args.limit,
+        "all_pages": bool(args.all_pages),
+        "page_count": len(pages),
         "ok": sum(1 for item in results if item["status"] == "ok"),
         "skipped": sum(1 for item in results if item["status"] == "skipped"),
         "error": sum(1 for item in results if item["status"] == "error"),
@@ -1443,6 +1402,7 @@ def _backfill_reference_batch(
         "selected_snapshots": [
             _reference_snapshot_identity_payload(snapshot) for snapshot in snapshots
         ],
+        "pages": _reference_batch_page_summaries(pages),
         "pending_items": [
             _reference_snapshot_identity_payload(snapshot)
             for snapshot in pending_preview
@@ -1468,6 +1428,156 @@ def _backfill_reference_batch(
         payload["validation"] = _validation_payload(validation)
         payload["db_counts"] = repository.counts()
     return payload
+
+
+def _reference_batch_pages(
+    *,
+    repository: SQLiteStockUniverseRepository,
+    args: argparse.Namespace,
+    security_types: tuple[str, ...],
+    active: bool | None,
+) -> tuple[list[dict[str, Any]], int]:
+    pages: list[dict[str, Any]] = []
+    offset = args.offset
+    total_available = 0
+    while True:
+        snapshots, page_total = repository.reference_snapshots_for_batch(
+            exchange=args.exchange,
+            market=args.market,
+            security_types=security_types,
+            active=active,
+            as_of_date=args.identity_as_of_date,
+            series_ids=args.ohlcv_series_id,
+            limit=args.limit,
+            offset=offset,
+        )
+        if not pages:
+            total_available = page_total
+        if not snapshots:
+            break
+        pages.append(
+            {
+                "page_index": len(pages) + 1,
+                "offset": offset,
+                "limit": args.limit,
+                "snapshots": tuple(snapshots),
+            }
+        )
+        if not args.all_pages:
+            break
+        offset += len(snapshots)
+        if offset >= page_total:
+            break
+    return pages, total_available
+
+
+def _reference_batch_page_summary(
+    page: dict[str, Any], *, include_ids: bool = True
+) -> dict[str, Any]:
+    snapshots = tuple(page["snapshots"])
+    ohlcv_series_ids = [snapshot.ohlcv_series_id for snapshot in snapshots]
+    tickers = [snapshot.ticker for snapshot in snapshots]
+    summary = {
+        "page_index": page["page_index"],
+        "offset": page["offset"],
+        "limit": page["limit"],
+        "selected": len(snapshots),
+        "tickers_preview": tickers[:10],
+        "first_ohlcv_series_id": ohlcv_series_ids[0] if ohlcv_series_ids else None,
+        "last_ohlcv_series_id": ohlcv_series_ids[-1] if ohlcv_series_ids else None,
+    }
+    if include_ids:
+        summary["ohlcv_series_ids"] = ohlcv_series_ids
+    else:
+        summary["ohlcv_series_id_count"] = len(ohlcv_series_ids)
+    return summary
+
+
+def _reference_batch_page_summaries(
+    pages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [_reference_batch_page_summary(page) for page in pages]
+
+
+def _execute_reference_batch_pages(
+    *,
+    progress: _CliProgressReporter,
+    pages: list[dict[str, Any]],
+    args: argparse.Namespace,
+    api_key: str,
+    repository: SQLiteStockUniverseRepository,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    progress.emit(
+        "started",
+        "reference-batch all-pages backfill started",
+        counts=_result_counts(results),
+        page_count=len(pages),
+    )
+    current_index = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        for page in pages:
+            page_summary = _reference_batch_page_summary(page, include_ids=False)
+            progress.emit(
+                "page_started",
+                "reference-batch page started",
+                page=page_summary,
+                counts=_result_counts(results),
+            )
+            for snapshot in page["snapshots"]:
+                current_index += 1
+                progress.emit(
+                    "input_started",
+                    "input execution started",
+                    current_input={
+                        "index": current_index,
+                        "type": "ohlcv_series_id",
+                        "value": str(snapshot.ohlcv_series_id),
+                    },
+                    page={
+                        "page_index": page["page_index"],
+                        "offset": page["offset"],
+                        "limit": page["limit"],
+                    },
+                    counts=_result_counts(results),
+                )
+                future = pool.submit(
+                    _execute_one_series_id,
+                    snapshot.ohlcv_series_id,
+                    args,
+                    api_key,
+                    repository,
+                )
+                result = progress.wait_for(
+                    future,
+                    heartbeat_message="input execution still running",
+                    summary_message="input execution summary",
+                    counts=lambda: _result_counts(results),
+                )
+                results.append(result)
+                progress.emit(
+                    "input_finished",
+                    "input execution finished",
+                    current_input={
+                        "index": current_index,
+                        "type": "ohlcv_series_id",
+                        "value": str(snapshot.ohlcv_series_id),
+                    },
+                    page={
+                        "page_index": page["page_index"],
+                        "offset": page["offset"],
+                        "limit": page["limit"],
+                    },
+                    result_status=result.get("status"),
+                    counts=_result_counts(results),
+                )
+            progress.emit(
+                "page_finished",
+                "reference-batch page finished",
+                page=page_summary,
+                counts=_result_counts(results),
+            )
+    return results
 
 
 _HARD_CATCH_UP_ERROR_TYPES = {
@@ -1834,7 +1944,7 @@ def _execute_one_ticker(
                 "ticker": ticker,
                 "status": "skipped",
                 "reason": "planner returned EvidenceNeeded",
-                "requests": [request.to_legacy_dict() for request in result.requests],
+                "requests": [request.to_payload() for request in result.requests],
                 "rounds": _rounds(trace.rounds),
                 "planning_request_count": len(client.request_log),
             }
@@ -1906,7 +2016,7 @@ def _live_execution_result_payload(
         "composite_figi": result.target.composite_figi,
         "share_class_figi": result.target.share_class_figi,
         "plan_status": result.status,
-        "segments": [segment.to_legacy_dict() for segment in result.segments],
+        "segments": [segment.to_payload() for segment in result.segments],
         "fetched_bar_count": receipt.fetched_bar_count,
         "inserted_bar_count": receipt.inserted_bar_count,
         "approval_hash": approval_record["approval_hash"],
@@ -1951,7 +2061,7 @@ def _execute_one_series_id(
                 "status": "skipped",
                 "selected_identity": _reference_snapshot_identity_payload(snapshot),
                 "reason": "planner returned EvidenceNeeded",
-                "requests": [request.to_legacy_dict() for request in result.requests],
+                "requests": [request.to_payload() for request in result.requests],
                 "rounds": _rounds(trace.rounds),
                 "planning_request_count": len(client.request_log),
             }
@@ -2315,81 +2425,6 @@ def _sqlite_schema_state(path: Path) -> dict[str, Any]:
     }
 
 
-def _execute_one_fixture(
-    path: Path,
-    args: argparse.Namespace,
-    api_key: str,
-    repository: SQLiteStockUniverseRepository,
-) -> dict[str, Any]:
-    try:
-        legacy = _load_fixture(path)
-        source, client = massive_live_dry_run_source_from_legacy_plan(
-            legacy,
-            api_key=api_key,
-            base_url=args.base_url,
-        )
-        trace = run_backfill_source_dry_run_trace(source, max_rounds=args.max_rounds)
-        result = trace.result
-        if not isinstance(result, BackfillPlan):
-            return {
-                "fixture": str(path),
-                "status": "skipped",
-                "reason": "planner returned EvidenceNeeded",
-                "requests": [request.to_legacy_dict() for request in result.requests],
-                "rounds": _rounds(trace.rounds),
-                "planning_request_count": len(client.request_log),
-            }
-        if result.status == "blocked":
-            return {
-                "fixture": str(path),
-                "status": "skipped",
-                "ohlcv_series_id": result.target.ohlcv_series_id,
-                "plan_status": result.status,
-                "reason": "blocked plans are not executable",
-            }
-        if result.status == "caution" and args.no_caution:
-            return {
-                "fixture": str(path),
-                "status": "skipped",
-                "ohlcv_series_id": result.target.ohlcv_series_id,
-                "plan_status": result.status,
-                "reason": "caution plan skipped by --no-caution",
-            }
-        approval, approval_record = _approved_execution_payload(
-            result,
-            repository,
-            reason="fixture-seeded CLI backfill approval",
-        )
-        receipt = execute_live_bar_backfill(
-            result,
-            approval,
-            client,
-            repository,
-            evidence_facts=(
-                live_dry_run_base_facts_from_legacy_plan(legacy)
-                + tuple(fact for item in trace.rounds for fact in item.collected_facts)
-            ),
-        )
-        return _live_execution_result_payload(
-            {"fixture": str(path)},
-            result=result,
-            receipt=receipt,
-            approval_record=approval_record,
-            planning_rounds=_rounds(trace.rounds),
-        )
-    except Exception as exc:
-        return {
-            "fixture": str(path),
-            "status": "error",
-            "error_type": exc.__class__.__name__,
-            "error": str(exc),
-        }
-
-
-def _load_fixture(path: str | Path) -> dict[str, Any]:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
 def _api_key(args: argparse.Namespace, parser: argparse.ArgumentParser) -> str:
     api_key = args.api_key or os.environ.get("MASSIVE_API_KEY")
     if not api_key:
@@ -2476,6 +2511,7 @@ def _reference_batch_selection_payload(args: argparse.Namespace) -> dict[str, An
     grain = normalize_bar_grain(args.bar_grain)
     return {
         "active": _reference_active_value(args.active),
+        "all_pages": bool(args.all_pages),
         "bar_grain": grain.bar_grain,
         "multiplier": grain.multiplier,
         "timespan": grain.timespan,
@@ -2542,10 +2578,12 @@ def _reference_batch_next_action(
     if not snapshots:
         return "update_reference_universe"
     if not args.commit:
+        if args.all_pages:
+            return "commit_all_pages"
         return "commit_selected_batch"
     if any(item["status"] != "ok" for item in results):
         return "repair_failures"
-    if pending_count:
+    if pending_count and not args.all_pages:
         return "continue_batch"
     return "done"
 
@@ -2562,13 +2600,28 @@ def _reference_batch_next_actions(
         actions.append(_reference_batch_update_reference_action(args))
         return actions
     if not args.commit:
+        action_name = (
+            "commit-all-reference-pages"
+            if args.all_pages
+            else "commit-selected-reference-batch"
+        )
+        description = (
+            "Execute every internally paged DB-backed OHLCV series ID in this selection."
+            if args.all_pages
+            else "Execute exactly the selected DB-backed OHLCV series IDs."
+        )
+        reason = (
+            "The dry-run manifest enumerates every internally paged persisted OHLCV series ID; --commit is required to execute."
+            if args.all_pages
+            else "The dry-run manifest only enumerates selected persisted OHLCV series IDs; --commit is required to execute."
+        )
         actions.append(
             {
-                "name": "commit-selected-reference-batch",
+                "name": action_name,
                 "kind": "command",
                 "command": {
                     "name": "stock-universe backfill-reference-batch",
-                    "description": "Execute exactly the selected DB-backed OHLCV series IDs.",
+                    "description": description,
                     "args": _reference_batch_command_args(args, commit=True),
                     "reads": _reference_batch_reads(_args_with_commit(args, True)),
                     "writes": [args.db],
@@ -2581,13 +2634,13 @@ def _reference_batch_next_actions(
                     }
                 ],
                 "requires_approval": True,
-                "reason": "The dry-run manifest only enumerates selected persisted OHLCV series IDs; --commit is required to execute.",
+                "reason": reason,
             }
         )
     for item in results:
         if item["status"] != "ok":
             actions.append(_reference_batch_failure_action(args, item))
-    if pending_count:
+    if pending_count and not args.all_pages:
         actions.append(
             {
                 "name": "continue-reference-batch",
@@ -2719,6 +2772,8 @@ def _reference_batch_command_args(
         command_args["identity_as_of_date"] = args.identity_as_of_date
     if args.ohlcv_series_id:
         command_args["ohlcv_series_id"] = list(args.ohlcv_series_id)
+    if args.all_pages:
+        command_args["all_pages"] = True
     command_args.update(_bar_grain_arg_if_override(args.bar_grain))
     if commit:
         command_args["commit"] = True
@@ -2748,9 +2803,7 @@ def _bar_grain_arg_if_override(bar_grain: str | None) -> dict[str, str]:
     return {"bar_grain": grain.bar_grain}
 
 
-def _planned_reads(args: argparse.Namespace, source_name: str) -> list[str]:
-    if source_name == "fixture":
-        return [args.fixture]
+def _planned_reads(args: argparse.Namespace) -> list[str]:
     if getattr(args, "ohlcv_series_id", None) is not None:
         reads = [
             f"sqlite.reference_universe:{args.db}",
@@ -2775,25 +2828,13 @@ def _planned_reads(args: argparse.Namespace, source_name: str) -> list[str]:
         if not args.api_key:
             reads.append("env:MASSIVE_API_KEY")
         return reads
-    reads = [
-        args.fixture,
-        "massive.ticker_events",
-        "massive.reference_boundary",
-        "massive.bar_probe",
-        "massive.identity_scan",
-        "massive.ticker_replacement",
-    ]
-    if not args.api_key:
-        reads.append("env:MASSIVE_API_KEY")
-    return reads
+    return []
 
 
 def _planned_writes(args: argparse.Namespace) -> list[str]:
     writes = []
     if args.capture_dir:
         writes.append(f"{args.capture_dir}/*.json")
-    if args.legacy_json_out:
-        writes.append(args.legacy_json_out)
     if args.markdown_out:
         writes.append(args.markdown_out)
     return writes
@@ -2809,14 +2850,6 @@ def _write_optional_plan_outputs(
     plan: BackfillPlan, args: argparse.Namespace, envelope: dict[str, Any]
 ) -> None:
     did_write = envelope["effects"]["did_write"]
-    if args.legacy_json_out:
-        path = Path(args.legacy_json_out)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(legacy_plan_dict(plan), indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        did_write.append(str(path))
     if args.markdown_out:
         path = Path(args.markdown_out)
         path.parent.mkdir(parents=True, exist_ok=True)

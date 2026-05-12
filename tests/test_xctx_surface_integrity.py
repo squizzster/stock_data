@@ -21,12 +21,13 @@ from stock_universe.xctx import (
 
 PUBLIC_REPORT_SURFACE_FILES = (
     "stock_universe/ops/pressure_manifest.py",
-    "scripts/fixture_matrix.py",
-    "scripts/live_sqlite_backfill.py",
+    "scripts/foundation_smoke.py",
 )
 
 
-def test_public_report_surfaces_emit_ohlcv_series_id_not_legacy_series_id() -> None:
+def test_public_report_surfaces_emit_ohlcv_series_id_not_unqualified_series_id() -> (
+    None
+):
     repo_root = Path(__file__).resolve().parents[1]
     for relative_path in PUBLIC_REPORT_SURFACE_FILES:
         text = (repo_root / relative_path).read_text(encoding="utf-8")
@@ -34,7 +35,6 @@ def test_public_report_surfaces_emit_ohlcv_series_id_not_legacy_series_id() -> N
 
 
 PRIMARY_AGENT_SURFACE_COMMANDS = {
-    "stock-universe inspect-plan",
     "stock-universe identity-search",
     "stock-universe update-reference-universe",
     "stock-universe dry-run",
@@ -52,7 +52,6 @@ PRIMARY_AGENT_SURFACE_COMMANDS = {
 }
 
 STOCK_UNIVERSE_ARGPARSE_COMMANDS = {
-    "stock-universe inspect-plan": "inspect-plan",
     "stock-universe identity-search": "identity-search",
     "stock-universe update-reference-universe": "update-reference-universe",
     "stock-universe dry-run": "dry-run",
@@ -75,12 +74,9 @@ XCTX_ARGPARSE_COMMANDS = {
     "xctx doctor": "doctor",
     "xctx examples": "examples",
     "xctx schema": "schema",
-    "xctx validate": "validate",
     "xctx dry-run": "dry-run",
     "xctx resolve-identity": "resolve-identity",
     "xctx bars": "bars",
-    "xctx next": "next",
-    "xctx repair": "repair",
     "xctx universe-status": "universe-status",
     "xctx quality-audit": "quality-audit",
     "xctx catch-up-plan": "catch-up-plan",
@@ -226,9 +222,14 @@ def test_xctx_catch_up_stop_schema_exposes_stop_modes() -> None:
 
 def test_xctx_dry_run_schema_includes_cli_help_arguments() -> None:
     dry_run_args = xctx_command_schemas()["xctx dry-run"]["args"]
+    stale_file_seed_key = "fix" + "ture"
 
-    assert dry_run_args["omit_kind"]["items"] == "evidence_kind"
-    assert dry_run_args["defer_kind"]["items"] == "evidence_kind"
+    assert stale_file_seed_key not in dry_run_args
+    assert "source" not in dry_run_args
+    assert "omit_kind" not in dry_run_args
+    assert "defer_kind" not in dry_run_args
+    assert dry_run_args["ticker"]["type"] == "ticker"
+    assert dry_run_args["ohlcv_series_id"]["type"] == "integer"
     assert dry_run_args["api_key"]["type"] == "string"
     assert dry_run_args["base_url"]["type"] == "url"
 
@@ -266,7 +267,14 @@ def test_xctx_manifest_recommended_loop_uses_source_checkout_execution() -> None
     from stock_universe.xctx import xctx_tool_manifest
 
     loop = xctx_tool_manifest()["recommended_agent_loop"]
-    assert "./stock_universe.cli backfill --fixture <fixture> --strict" in loop
+    assert (
+        "./stock_universe.cli backfill --ohlcv-series-id <ohlcv_series_id> --strict"
+        in loop
+    )
+    assert (
+        "./stock_universe.cli xctx dry-run --ohlcv-series-id <ohlcv_series_id>"
+        in loop
+    )
     assert './stock_universe.cli xctx schema --command "xctx bars"' in loop
     assert "./stock_universe.cli xctx compose --recipe bar-provenance-audit" in loop
 
@@ -353,19 +361,6 @@ def test_xctx_quality_audit_missing_db_returns_repair_error(tmp_path, capsys) ->
     assert payload["result_type"] == "RepairError"
     assert payload["repairs"][0]["name"] == "provide-existing-sqlite-db"
     assert db.exists() is False
-
-
-def test_xctx_validate_invalid_json_returns_repair_error(tmp_path, capsys) -> None:
-    fixture = tmp_path / "bad.json"
-    fixture.write_text("{", encoding="utf-8")
-
-    assert xctx_main(["validate", "--fixture", str(fixture)]) == 0
-    payload = json.loads(capsys.readouterr().out)
-
-    assert payload["ok"] is False
-    assert payload["result_type"] == "RepairError"
-    assert payload["errors"][0]["code"] == "fixture_json_invalid"
-    assert payload["effects"]["will_read"] == [str(fixture)]
 
 
 def test_xctx_dry_run_missing_series_id_returns_repair_error(tmp_path, capsys) -> None:

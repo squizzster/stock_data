@@ -254,19 +254,19 @@ def reference_snapshot_seed_base_facts(
         EvidenceFact(
             "target_identity",
             (str(series_id),),
-            target.to_legacy_dict(),
+            target.to_payload(),
             "sqlite.reference_universe",
         ),
         EvidenceFact(
             "backfill_request",
             (str(series_id),),
-            request.to_legacy_dict(),
+            request.to_payload(),
             "series_id_seed",
         ),
         EvidenceFact(
             "known_aliases",
             (str(series_id),),
-            [alias.to_legacy_dict() for alias in known_aliases],
+            [alias.to_payload() for alias in known_aliases],
             "sqlite.reference_universe",
         ),
         EvidenceFact("plan_metadata", (str(series_id),), metadata, "series_id_seed"),

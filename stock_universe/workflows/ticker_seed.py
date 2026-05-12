@@ -163,19 +163,19 @@ def ticker_seed_base_facts_from_snapshot(
         EvidenceFact(
             "target_identity",
             (str(series_id),),
-            target.to_legacy_dict(),
+            target.to_payload(),
             "massive.ticker_seed",
         ),
         EvidenceFact(
             "backfill_request",
             (str(series_id),),
-            request.to_legacy_dict(),
+            request.to_payload(),
             "ticker_seed",
         ),
         EvidenceFact(
             "known_aliases",
             (str(series_id),),
-            [alias.to_legacy_dict() for alias in known_aliases],
+            [alias.to_payload() for alias in known_aliases],
             "massive.ticker_seed",
         ),
         EvidenceFact("plan_metadata", (str(series_id),), metadata, "ticker_seed"),

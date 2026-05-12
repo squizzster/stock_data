@@ -2,7 +2,7 @@
 """Foundation smoke harness for the new stock universe engine slice.
 
 This script is intentionally offline. It checks Python compilation, runs the
-fixture parity suite, and emits a compact machine-readable summary.
+foundation test suite, and emits a compact machine-readable summary.
 """
 
 from __future__ import annotations

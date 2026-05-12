@@ -334,27 +334,6 @@ def _inactive_fallback_requests(
     )
 
 
-def _legacy_live_search_params(
-    query: str,
-    *,
-    as_of_date: str | None,
-    limit: int,
-    force_search: bool = False,
-) -> dict[str, str]:
-    """Compatibility helper for older tests/imports."""
-    params = {
-        "active": "true",
-        "limit": str(limit),
-    }
-    if as_of_date:
-        params["date"] = as_of_date
-    if _looks_like_cik(query) and not force_search:
-        params["cik"] = _zero_pad_cik(query)
-    else:
-        params["search"] = query
-    return params
-
-
 def _payload_results(payload: dict[str, Any]) -> list[Any]:
     results = payload.get("results") or []
     if isinstance(results, list):

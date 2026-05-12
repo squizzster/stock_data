@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stock-production"
 version = "0.1.0"
-description = "Behavior-preserving stock universe planning engine slice."
+description = "Stock universe data foundation."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
@@ -28,5 +28,8 @@ pythonpath = ["."]
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.15.12",
 ]

@@ -234,8 +234,8 @@ def _terminal_coverage_fact(
                 "requested_to_date": to_date,
             },
             validation=(
-                _segment_validation_row(start_fact.to_legacy_dict(), "start"),
-                _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+                _segment_validation_row(start_fact.to_payload(), "start"),
+                _segment_validation_row(end_fact.to_payload(), "end"),
             ),
             extra={
                 "terminal_coverage_probe": {
@@ -824,8 +824,8 @@ def _target_valid_original_ticker_fact_for_window(
         source=f"ticker_events+{reason}",
         event_date=from_date,
         validation=(
-            _segment_validation_row(start_fact.to_legacy_dict(), "start"),
-            _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+            _segment_validation_row(start_fact.to_payload(), "start"),
+            _segment_validation_row(end_fact.to_payload(), "end"),
         ),
         metadata={
             "ticker_replacement": {

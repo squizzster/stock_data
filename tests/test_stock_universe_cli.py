@@ -11,9 +11,13 @@ import pytest
 
 from stock_universe import cli as stock_universe_cli_module
 from stock_universe.cli import main as stock_universe_main
-from stock_universe.domain import BackfillRequest
-from stock_universe.evidence import ledger_from_legacy_plan
-from stock_universe.planner import plan_backfill
+from stock_universe.domain import (
+    BackfillPlan,
+    BackfillRequest,
+    PlannedSegment,
+    RuleDecision,
+    TargetIdentity,
+)
 from stock_universe.storage import (
     SQLiteStockUniverseRepository,
     StoredReferenceSnapshot,
@@ -23,7 +27,6 @@ from stock_universe.xctx import cli as xctx_cli_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "legacy_plans"
 
 
 def _payload(capsys):
@@ -139,7 +142,8 @@ def test_source_checkout_xctx_help_uses_runnable_wrapper_path() -> None:
     assert result.returncode == 0
     assert "1. ./stock_universe.cli xctx doctor" in result.stdout
     assert (
-        "8. ./stock_universe.cli backfill --fixture <fixture> --strict" in result.stdout
+        "8. ./stock_universe.cli backfill --ohlcv-series-id <ohlcv_series_id> --strict"
+        in result.stdout
     )
 
 
@@ -164,33 +168,6 @@ def test_xctx_main_keyboard_interrupt_returns_130(monkeypatch, capsys) -> None:
 
     assert xctx_cli_module.main(["tree"], prog="stock-universe xctx") == 130
     assert "stock-universe xctx: interrupted" in capsys.readouterr().err
-
-
-def test_stock_universe_inspect_plan_emits_summary(capsys) -> None:
-    fixture = str(FIXTURE_DIR / "simple_current_sfbc.json")
-
-    assert stock_universe_main(["inspect-plan", "--fixture", fixture]) == 0
-    payload = _payload(capsys)
-
-    assert payload["ok"] is True
-    assert payload["result_type"] == "BackfillPlan"
-    assert payload["summary"]["latest_ticker"] == "SFBC"
-    assert payload["summary"]["segment_count"] == 1
-
-
-def test_stock_universe_fixture_dry_run_uses_offline_source(capsys) -> None:
-    fixture = str(FIXTURE_DIR / "ticker_rename_meta.json")
-
-    assert (
-        stock_universe_main(["dry-run", "--source", "fixture", "--fixture", fixture])
-        == 0
-    )
-    payload = _payload(capsys)
-
-    assert payload["ok"] is True
-    assert payload["command"] == "stock-universe dry-run:fixture"
-    assert payload["effects"]["will_read"] == [fixture]
-    assert payload["rounds"][0]["result_type"] == "BackfillPlan"
 
 
 def test_stock_universe_validate_db_initializes_and_validates(
@@ -530,11 +507,7 @@ def test_reference_snapshot_refresh_updates_series_target_json(tmp_path: Path) -
 def test_persisted_series_target_json_omits_natural_key(tmp_path: Path) -> None:
     db = tmp_path / "stock_universe.sqlite"
     repository = SQLiteStockUniverseRepository(db)
-    legacy = json.loads(
-        (FIXTURE_DIR / "simple_current_sfbc.json").read_text(encoding="utf-8")
-    )
-    plan = plan_backfill(ledger_from_legacy_plan(legacy).snapshot())
-    plan = _plan_with_allocated_lookup(repository, plan)
+    plan = _plan_with_allocated_lookup(repository, _sample_plan())
 
     repository.persist_plan_context(plan)
 
@@ -633,3 +606,53 @@ def _plan_with_allocated_lookup(repository: SQLiteStockUniverseRepository, plan)
         adjusted=plan.request.adjusted,
     )
     return replace(plan, target=target, request=request)
+
+
+def _sample_plan() -> BackfillPlan:
+    target = TargetIdentity(
+        ohlcv_series_id=0,
+        company_name="Sound Financial Bancorp Inc.",
+        cik="0001495925",
+        composite_figi="BBG000SFBC01",
+        share_class_figi="BBG000SFBC02",
+        identity_status="permanent",
+        latest_ticker="SFBC",
+        latest_primary_exchange="XNAS",
+        locale="us",
+        market="stocks",
+        natural_key="massive:composite_figi:BBG000SFBC01",
+        security_type="CS",
+    )
+    request = BackfillRequest(
+        series_id=0,
+        from_date="2021-01-04",
+        to_date="2021-01-05",
+        multiplier=1,
+        timespan="day",
+        adjusted=True,
+    )
+    return BackfillPlan(
+        request=request,
+        status="safe",
+        target=target,
+        segments=(
+            PlannedSegment(
+                segment_index=1,
+                ticker="SFBC",
+                from_date="2021-01-04",
+                to_date="2021-01-05",
+                source="unit-test",
+            ),
+        ),
+        decisions=(
+            RuleDecision(
+                rule_name="unit.safe",
+                outcome="pass",
+                segment_id="segment:1",
+                reason="unit test plan is executable",
+            ),
+        ),
+        evidence_ledger_hash="unit-ledger",
+        planner_version="unit-test",
+        created_at_utc="2026-05-12T00:00:00Z",
+    )

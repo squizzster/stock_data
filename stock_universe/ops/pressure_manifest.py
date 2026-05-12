@@ -72,7 +72,7 @@ PRESSURE_COHORT_PLANS = (
             "skipped_count equals 0",
             "error_count equals 0",
             "request-count outliers are reviewed",
-            "new failures become fixtures or typed evidence gaps",
+            "new failures become typed regression cases or typed evidence gaps",
         ),
         next_cohort="expansion-250",
     ),
@@ -120,12 +120,12 @@ PRESSURE_COHORT_PLANS = (
             "Include historical FIGI rekeys.",
             "Include same-ticker reuse cases.",
             "Include long gaps and sparse coverage cases.",
-            "Promote confirmed failures into fixtures.",
+            "Promote confirmed failures into typed regression cases.",
         ),
         success_factors=(
             "hard cases resolve through typed evidence, not exceptions",
             "unresolved cases produce precise EvidenceNeeded results",
-            "new planner behavior has fixture coverage before broad reuse",
+            "new planner behavior has typed regression coverage before broad reuse",
         ),
         next_cohort="maintain-and-repeat",
     ),
@@ -299,7 +299,7 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _result_label(item: dict[str, Any], index: int) -> str:
-    for key in ("fixture", "ticker", "latest_ticker"):
+    for key in ("input", "ticker", "latest_ticker"):
         if item.get(key):
             return str(item[key])
     ohlcv_series_id = item.get("ohlcv_series_id", item.get("series_id"))

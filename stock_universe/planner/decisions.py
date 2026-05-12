@@ -13,23 +13,6 @@ from stock_universe.domain import (
 )
 
 
-def _legacy_decisions(evidence: EvidenceSnapshot) -> tuple[RuleDecision, ...]:
-    decisions: list[RuleDecision] = []
-    for index, fact in enumerate(evidence.get_all("legacy_decision"), 1):
-        payload = fact.payload_value()
-        decisions.append(
-            RuleDecision(
-                rule_name=str(payload.get("rule_name") or "legacy.compatibility"),
-                outcome=payload.get("outcome", "warn"),
-                segment_id=payload.get("segment_id"),
-                reason=str(payload.get("reason") or ""),
-                evidence_refs=(f"legacy_decision:{':'.join(fact.key)}",),
-                decision_id=str(payload.get("decision_id") or f"legacy:{index}"),
-            )
-        )
-    return tuple(decisions)
-
-
 def _derived_fact_decisions(evidence: EvidenceSnapshot) -> tuple[RuleDecision, ...]:
     decisions: list[RuleDecision] = []
     for index, fact in enumerate(evidence.get_all("ticker_replacement"), 1):
@@ -137,7 +120,7 @@ def _validate_segment_identity_flags(
                 )
             )
             continue
-        validation_rows: list[dict[str, Any]] = segment.to_legacy_dict().get(
+        validation_rows: list[dict[str, Any]] = segment.to_payload().get(
             "validation", []
         )
         for row in validation_rows:

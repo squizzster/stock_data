@@ -202,10 +202,10 @@ def update_reference_universe_reporting_policy() -> dict[str, Any]:
 
 def backfill_reference_batch_reporting_policy() -> dict[str, Any]:
     return agent_reporting_policy(
-        applies_when="commit=true and (limit > 1 or len(ohlcv_series_id) > 1 or expected_duration_seconds >= 10)",
+        applies_when="commit=true and (all_pages=true or limit > 1 or len(ohlcv_series_id) > 1 or expected_duration_seconds >= 10)",
         begin=(
-            "Tell the end-user the reference-batch backfill is starting, what bounded selection "
-            "will execute, whether --commit writes, and what error/stall signals require attention."
+            "Tell the end-user the reference-batch backfill is starting, whether it is bounded "
+            "or internally paged, whether --commit writes, and what error/stall signals require attention."
         ),
         status_sources=(
             "stderr JSON lines prefixed 'backfill-reference-batch progress:'",
@@ -219,6 +219,8 @@ def backfill_reference_batch_reporting_policy() -> dict[str, Any]:
                 "started",
                 "heartbeat",
                 "summary",
+                "page_started",
+                "page_finished",
                 "input_started",
                 "input_finished",
                 "finished",

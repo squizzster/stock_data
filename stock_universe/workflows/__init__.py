@@ -11,10 +11,6 @@ from .backfill_plan import (
     run_backfill_source_planning_loop,
     run_backfill_source_planning_trace,
 )
-from .live_dry_run import (
-    live_dry_run_base_facts_from_legacy_plan,
-    massive_live_dry_run_source_from_legacy_plan,
-)
 from .identity_search import (
     IdentitySearchCandidate,
     IdentitySearchResult,
@@ -64,8 +60,6 @@ __all__ = [
     "run_backfill_source_dry_run_trace",
     "run_backfill_source_planning_loop",
     "run_backfill_source_planning_trace",
-    "live_dry_run_base_facts_from_legacy_plan",
-    "massive_live_dry_run_source_from_legacy_plan",
     "IdentitySearchCandidate",
     "IdentitySearchResult",
     "live_identity_search",

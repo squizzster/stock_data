@@ -49,19 +49,16 @@ Useful discovery commands:
 ## Local Gates
 
 ```bash
-python -m py_compile stock_universe/storage/sqlite_repo.py stock_universe/quality_audit.py
-pytest tests/test_sqlite_foundation.py tests/test_market_calendar.py tests/test_sqlite_access.py -q
-pytest tests/test_xctx_surface_integrity.py tests/test_xctx_bar_observation.py tests/test_xctx_v2_bar_observation.py -q
+uv run python scripts/run_quality_gate.py lint
+uv run pytest tests/test_reference_universe.py tests/test_xctx_surface_integrity.py -q
+uv run pytest tests/test_sqlite_foundation.py tests/test_market_calendar.py tests/test_sqlite_access.py -q
 ```
 
-Broader non-fixture gate used for the current foundation:
+Broader gate used for the current foundation:
 
 ```bash
-pytest tests/test_market_calendar.py tests/test_sqlite_foundation.py tests/test_sqlite_access.py tests/test_xctx_bar_observation.py tests/test_xctx_v2_bar_observation.py tests/test_packaging_metadata.py tests/test_xctx_surface_integrity.py tests/test_catch_up_workflow.py tests/test_massive_alias_history.py tests/test_massive_reference_and_probes.py tests/test_massive_ticker_replacement.py tests/test_reference_universe.py tests/test_ticker_seed.py tests/test_pressure_manifest.py -q
+uv run pytest tests/test_market_calendar.py tests/test_sqlite_foundation.py tests/test_sqlite_access.py tests/test_xctx_bar_observation.py tests/test_xctx_v2_bar_observation.py tests/test_packaging_metadata.py tests/test_xctx_surface_integrity.py tests/test_catch_up_workflow.py tests/test_massive_alias_history.py tests/test_massive_reference_and_probes.py tests/test_massive_ticker_replacement.py tests/test_reference_universe.py tests/test_ticker_seed.py tests/test_pressure_manifest.py -q
 ```
-
-Some legacy fixture tests require `tests/fixtures/legacy_plans/`, which is not
-present in this checkout.
 
 ## Live Smoke
 
@@ -70,8 +67,8 @@ Requires `MASSIVE_API_KEY`.
 ```bash
 ./stock_universe.cli validate-db
 ./stock_universe.cli update-reference-universe --limit 1000 --max-pages 100 --commit
-./stock_universe.cli backfill --ticker NVDA --bar-grain 1d --strict
-./stock_universe.cli backfill --ticker NVDA --bar-grain 30m --strict
+./stock_universe.cli backfill-reference-batch --exchange XNAS --market stocks --bar-grain 1d --page-size 1000 --all-pages
+./stock_universe.cli backfill-reference-batch --exchange XNAS --market stocks --bar-grain 1d --page-size 1000 --all-pages --commit --strict
 ./stock_universe.cli validate-db
 ./stock_universe.cli xctx bars --ohlcv-series-id 7964 --date 2024-06-10 --bar-grain 1d --view extra_detail
 ```

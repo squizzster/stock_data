@@ -38,7 +38,7 @@ class PlannedSegment:
         return f"segment:{self.segment_index}"
 
     @classmethod
-    def from_legacy_dict(cls, payload: dict[str, Any]) -> "PlannedSegment":
+    def from_payload(cls, payload: dict[str, Any]) -> "PlannedSegment":
         known_fields = {
             "segment_index",
             "ticker",
@@ -65,7 +65,7 @@ class PlannedSegment:
             },
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "from_date": self.from_date.isoformat(),
             "segment_index": self.segment_index,

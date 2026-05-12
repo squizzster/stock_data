@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "gate",
-        choices=("compile", "offline", "xctx", "sqlite"),
+        choices=("compile", "lint", "offline", "xctx", "sqlite"),
         help="Named validation gate to run.",
     )
     parser.add_argument("--json", action="store_true", help="Emit a JSON summary.")
@@ -48,6 +48,22 @@ def _gate_steps(gate: str) -> list[tuple[str, list[str]]]:
     compile_step = ("compile", _compile_command())
     if gate == "compile":
         return [compile_step]
+    if gate == "lint":
+        return [
+            compile_step,
+            (
+                "ruff-undefined-names",
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    "stock_universe",
+                    "--select",
+                    "F821",
+                ],
+            ),
+        ]
     if gate == "offline":
         return [compile_step, ("pytest", [sys.executable, "-m", "pytest", "-q"])]
     if gate == "xctx":

@@ -776,7 +776,7 @@ def test_reference_boundary_provider_defers_deep_start_gap_when_alias_history_is
     ]
 
 
-def test_reference_boundary_suffix_search_matches_legacy_linear_result_inside_cap() -> (
+def test_reference_boundary_suffix_search_matches_prior_linear_result_inside_cap() -> (
     None
 ):
     target = TargetIdentity(
@@ -862,9 +862,7 @@ def test_reference_boundary_suffix_search_matches_legacy_linear_result_inside_ca
     assert len(reference_detail_calls) < 20
 
 
-def test_reference_boundary_suffix_search_preserves_legacy_fallback_without_right_anchor() -> (
-    None
-):
+def test_reference_boundary_suffix_search_preserves_established_fallback_without_right_anchor() -> None:
     target = TargetIdentity(
         ohlcv_series_id=3, composite_figi="BBG01B0JRCS6", latest_ticker="AAA"
     )
@@ -982,7 +980,7 @@ def test_reference_boundary_suffix_search_handles_all_monotonic_suffix_starts() 
         assert fact is not None
         assert fact.as_of_date.isoformat() == dates[suffix_index]
         assert (
-            fact.to_legacy_dict()["payload"]["boundary_search"]["candidate_date"]
+            fact.to_payload()["payload"]["boundary_search"]["candidate_date"]
             == dates[suffix_index]
         )
         assert len(client.request_log) <= 2 * len(dates).bit_length() + 3
@@ -1113,10 +1111,10 @@ def test_reference_boundary_suffix_search_ignores_transient_match_before_final_s
     assert fact is not None
     assert fact.as_of_date.isoformat() == suffix_start
     assert (
-        fact.to_legacy_dict()["payload"]["boundary_search"]["candidate_date"]
+        fact.to_payload()["payload"]["boundary_search"]["candidate_date"]
         == suffix_start
     )
-    assert fact.to_legacy_dict()["payload"]["boundary_search"]["rule"].startswith(
+    assert fact.to_payload()["payload"]["boundary_search"]["rule"].startswith(
         "The rightmost bar date must validate"
     )
 

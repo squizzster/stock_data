@@ -192,7 +192,7 @@ def _first_bar_boundary_fact_after_start_gap(
         return anchored_suffix
 
     # Without a matching right anchor, the ordered suffix invariant is absent.
-    # Preserve legacy behavior for unusual non-monotonic provider histories.
+    # Preserve established behavior for unusual non-monotonic provider histories.
     for date in dates[:START_GAP_BAR_SCAN_LIMIT]:
         fact = _reference_boundary_fact_for_date(
             client,

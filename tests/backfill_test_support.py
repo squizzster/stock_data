@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from dataclasses import replace
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-
-import pytest
 
 from stock_universe.domain import (
     AliasHistoryFact,
@@ -28,11 +24,8 @@ from stock_universe.domain import (
 from stock_universe.evidence import (
     EvidenceCollectionError,
     ProviderBackfillEvidenceSource,
-    StaticBackfillEvidenceSource,
     collect_initial_backfill_evidence,
     collect_requested_evidence,
-    facts_from_legacy_plan,
-    ledger_from_legacy_plan,
     bar_probe_fact_from_result,
     handoff_segment_fact_from_target_valid_event_window,
     identity_scan_fact_from_result,
@@ -71,12 +64,10 @@ from stock_universe.providers import (
     TickerReplacementWindow,
     massive_read_only_provider_set,
 )
-from stock_universe.reports import legacy_plan_dict, render_backfill_plan_markdown
+from stock_universe.reports import render_backfill_plan_markdown
 from stock_universe.storage import SQLiteStockUniverseRepository
 from stock_universe.workflows import (
     run_backfill_planning_trace,
-    live_dry_run_base_facts_from_legacy_plan,
-    massive_live_dry_run_source_from_legacy_plan,
     run_backfill_source_dry_run_trace,
     run_backfill_source_planning_trace,
 )
@@ -87,14 +78,6 @@ from stock_universe.xctx import (
     xctx_tool_manifest,
 )
 from stock_universe.xctx.cli import main as xctx_main
-
-
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "legacy_plans"
-ALL_LEGACY_FIXTURES = tuple(sorted(path.name for path in FIXTURE_DIR.glob("*.json")))
-
-
-def load_fixture(name: str) -> dict:
-    return json.loads((FIXTURE_DIR / name).read_text())
 
 
 def without_facts(ledger: EvidenceLedger, *kinds: str) -> EvidenceLedger:
@@ -123,45 +106,6 @@ def plan_with_allocated_lookup(
     return replace(plan, target=target, request=request)
 
 
-def ledger_from_static_source_without_candidates(
-    legacy: dict,
-    *,
-    defer_kinds: tuple[str, ...] = (),
-) -> EvidenceLedger:
-    source = StaticBackfillEvidenceSource.from_legacy_plan(
-        legacy,
-        include_candidate_segments=False,
-        defer_kinds=defer_kinds,
-    )
-    return collect_initial_backfill_evidence(source)
-
-
-def provider_source_from_legacy_plan(
-    legacy: dict,
-    *,
-    seed_provider_kinds: tuple[str, ...],
-) -> ProviderBackfillEvidenceSource:
-    facts = facts_from_legacy_plan(legacy, include_candidate_segments=False)
-    base_kinds = {
-        "backfill_request",
-        "event_lookup",
-        "known_aliases",
-        "legacy_decision",
-        "plan_metadata",
-        "target_identity",
-    }
-    base_facts = tuple(fact for fact in facts if fact.kind in base_kinds)
-    provider_facts = tuple(
-        fact
-        for fact in facts
-        if fact.kind not in base_kinds and fact.kind != "candidate_segments"
-    )
-    providers = BackfillProviderSet(
-        (StaticBackfillFactProvider(provider_facts, seed_provider_kinds),)
-    )
-    return ProviderBackfillEvidenceSource(base_facts, providers)
-
-
 def boundary_probe(
     ticker: str, as_of_date: str, point: str, snapshot: ReferenceSnapshot
 ) -> ReferenceBoundaryProbe:
@@ -188,37 +132,3 @@ class QueueHttpJsonTransport:
         if not self.responses:
             raise AssertionError("no queued HTTP response")
         return self.responses.pop(0)
-
-
-def assert_core_parity(actual: dict, legacy: dict) -> None:
-    assert actual["status"] == legacy["status"]
-    assert actual["target"]["ohlcv_series_id"] == legacy["target"]["ohlcv_series_id"]
-    assert actual["target"]["latest_ticker"] == legacy["target"]["latest_ticker"]
-    assert actual["target"]["identity_status"] == legacy["target"]["identity_status"]
-    assert actual["range"] == legacy["range"]
-    assert actual["warnings"] == legacy.get("warnings", [])
-    assert actual["errors"] == legacy.get("errors", [])
-
-    actual_segments = [
-        {
-            "segment_index": segment["segment_index"],
-            "ticker": segment["ticker"],
-            "from_date": segment["from_date"],
-            "to_date": segment["to_date"],
-            "source": segment["source"],
-            "valid": segment["valid"],
-        }
-        for segment in actual["segments"]
-    ]
-    legacy_segments = [
-        {
-            "segment_index": segment["segment_index"],
-            "ticker": segment["ticker"],
-            "from_date": segment["from_date"],
-            "to_date": segment["to_date"],
-            "source": segment["source"],
-            "valid": segment["valid"],
-        }
-        for segment in legacy["segments"]
-    ]
-    assert actual_segments == legacy_segments

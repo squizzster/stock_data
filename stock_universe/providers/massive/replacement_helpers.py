@@ -53,7 +53,7 @@ def _missing_durable_start_replacement_fact(
     start_row["point"] = "start"
     validation = (
         start_row,
-        _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+        _segment_validation_row(end_fact.to_payload(), "end"),
     )
     metadata = {
         "ticker_replacement": {
@@ -140,7 +140,7 @@ def _historical_figi_rekey_bar_alias_replacement_fact(
     }
     validation = (
         start_row,
-        _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+        _segment_validation_row(end_fact.to_payload(), "end"),
     )
     metadata = {
         "ticker_replacement": {

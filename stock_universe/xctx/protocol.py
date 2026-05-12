@@ -120,41 +120,12 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
         "returns": "CommandSpec and BindingMap",
         "mutates": False,
     },
-    "xctx validate": {
-        "description": "Validate fixture evidence and return a typed planning envelope.",
-        "args": {
-            "fixture": {"required": True, "type": "path"},
-            "omit_kind": {"required": False, "type": "array", "items": "evidence_kind"},
-            "approve_execution": {
-                "required": False,
-                "type": "boolean",
-                "default": False,
-            },
-        },
-        "input_rule": "Read-only validation. approve_execution only exposes the production backfill command as a next action; xctx does not execute or persist approval.",
-        "reads": ["fixture"],
-        "writes": [],
-        "returns": "ResultEnvelope",
-        "mutates": False,
-    },
     "xctx dry-run": {
-        "description": "Rehearse adaptive planning from fixture evidence or a live ticker seed.",
+        "description": "Rehearse adaptive planning from a live ticker seed or a DB-selected OHLCV series ID.",
         "args": {
-            "fixture": {"required": False, "type": "path"},
             "ticker": {"required": False, "type": "ticker"},
             "ohlcv_series_id": {"required": False, "type": "integer"},
             "db": {"required": False, "type": "path", "default": CANONICAL_DB},
-            "source": {
-                "required": False,
-                "enum": ["fixture", "live"],
-                "default": "fixture",
-            },
-            "omit_kind": {"required": False, "type": "array", "items": "evidence_kind"},
-            "defer_kind": {
-                "required": False,
-                "type": "array",
-                "items": "evidence_kind",
-            },
             "api_key": {"required": False, "type": "string"},
             "base_url": {
                 "required": False,
@@ -175,9 +146,9 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
                 "default": DEFAULT_MAX_ROUNDS,
             },
         },
-        "input_rule": "Provide exactly one of fixture, ticker, or ohlcv_series_id. Ticker and ohlcv_series_id inputs use live read-oriented providers; ohlcv_series_id also requires db.",
+        "input_rule": "Provide exactly one of ticker or ohlcv_series_id. Ticker and ohlcv_series_id inputs use live read-oriented providers; ohlcv_series_id also requires db.",
         "reads": [
-            "fixture, Massive reference ticker, or SQLite reference universe",
+            "Massive reference ticker or SQLite reference universe",
             "evidence-source",
         ],
         "writes": [],
@@ -206,7 +177,12 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
                 "default": "https://api.massive.com",
             },
             "as_of_date": {"required": False, "type": "date"},
-            "limit": {"required": False, "type": "integer", "default": 25},
+            "limit": {
+                "required": False,
+                "type": "integer",
+                "default": 25,
+                "description": "Bounded selection size; with all_pages=true this is the internal page size. CLI alias: --page-size.",
+            },
         },
         "reads": ["Massive API or SQLite DB"],
         "writes": [],
@@ -265,14 +241,6 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
         "reads": ["SQLite DB"],
         "writes": [],
         "returns": "BarObservationList",
-        "mutates": False,
-    },
-    "stock-universe inspect-plan": {
-        "description": "Inspect a fixture-seeded plan through the pure planner using fixture evidence.",
-        "args": {"fixture": {"required": True, "type": "path"}},
-        "reads": ["fixture"],
-        "writes": [],
-        "returns": "ResultEnvelope with plan summary",
         "mutates": False,
     },
     "stock-universe identity-search": {
@@ -367,6 +335,7 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
             "identity_as_of_date": {"required": False, "type": "date"},
             "limit": {"required": False, "type": "integer", "default": 25},
             "offset": {"required": False, "type": "integer", "default": 0},
+            "all_pages": {"required": False, "type": "boolean", "default": False},
             "api_key": {"required": False, "type": "string"},
             "base_url": {
                 "required": False,
@@ -387,7 +356,12 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
             "heartbeat_seconds": {"required": False, "type": "integer", "default": 60},
             "summary_seconds": {"required": False, "type": "integer", "default": 180},
         },
-        "input_rule": "Default mode emits a read-oriented manifest of selected persisted OHLCV series IDs. With commit it executes the selected IDs.",
+        "input_rule": (
+            "Default mode emits a read-oriented manifest of selected persisted OHLCV series IDs. "
+            "Without all_pages it is a bounded slice. With all_pages=true it internally pages every "
+            "matching persisted OHLCV series ID, using limit as the page size. With commit it executes "
+            "the selected IDs."
+        ),
         "reads": ["SQLite reference universe", "Massive API when commit=true"],
         "writes": ["SQLite DB when commit=true"],
         "returns": "ReferenceBatchManifest",
@@ -398,7 +372,6 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
         "description": "Execute approved live backfill effects through the production CLI.",
         "args": {
             "db": {"required": False, "type": "path", "default": CANONICAL_DB},
-            "fixture": {"required": False, "type": "array", "items": "path"},
             "ticker": {"required": False, "type": "array", "items": "ticker"},
             "strict": {"required": False, "type": "boolean", "default": False},
             "ohlcv_series_id": {"required": False, "type": "array", "items": "integer"},
@@ -428,16 +401,10 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
         "agent_reporting": backfill_reporting_policy(),
     },
     "stock-universe dry-run": {
-        "description": "Production CLI planning rehearsal from fixture, live ticker, or DB OHLCV series ID.",
+        "description": "Production CLI planning rehearsal from a live ticker or DB OHLCV series ID.",
         "args": {
-            "fixture": {"required": False, "type": "path"},
             "ticker": {"required": False, "type": "ticker"},
             "ohlcv_series_id": {"required": False, "type": "integer"},
-            "source": {
-                "required": False,
-                "enum": ["fixture", "live"],
-                "default": "fixture",
-            },
             "db": {"required": False, "type": "path", "default": CANONICAL_DB},
             "api_key": {"required": False, "type": "string"},
             "base_url": {
@@ -455,13 +422,11 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
                 "type": "integer",
                 "default": DEFAULT_MAX_ROUNDS,
             },
-            "legacy_json_out": {"required": False, "type": "path"},
             "markdown_out": {"required": False, "type": "path"},
         },
-        "input_rule": "Provide exactly one of fixture, ticker, or ohlcv_series_id. Output files are explicit opt-in writes.",
-        "reads": ["fixture, Massive API, or SQLite reference universe"],
+        "input_rule": "Provide exactly one of ticker or ohlcv_series_id. Output files are explicit opt-in writes.",
+        "reads": ["Massive API or SQLite reference universe"],
         "writes": [
-            "legacy-json-out file when requested",
             "markdown-out file when requested",
             "capture-dir raw files when requested",
         ],
@@ -793,34 +758,6 @@ XCTX_COMMAND_SCHEMAS: dict[str, dict[str, Any]] = {
         "returns": "ExecutionAudit",
         "mutates": False,
     },
-    "xctx next": {
-        "description": "Return the next valid transitions for the current planning state.",
-        "args": {
-            "fixture": {"required": True, "type": "path"},
-            "omit_kind": {"required": False, "type": "array", "items": "evidence_kind"},
-            "approve_execution": {
-                "required": False,
-                "type": "boolean",
-                "default": False,
-            },
-        },
-        "input_rule": "Read-only next-action inspection. approve_execution only exposes the production backfill command as a next action; xctx does not execute or persist approval.",
-        "reads": ["fixture"],
-        "writes": [],
-        "returns": "NextAction list",
-        "mutates": False,
-    },
-    "xctx repair": {
-        "description": "Return repair actions for unresolved evidence.",
-        "args": {
-            "fixture": {"required": True, "type": "path"},
-            "omit_kind": {"required": False, "type": "array", "items": "evidence_kind"},
-        },
-        "reads": ["fixture"],
-        "writes": [],
-        "returns": "RepairError or RepairAction list",
-        "mutates": False,
-    },
     "xctx compose": {
         "description": "Return executable-context recipes that compose transitions into workflows.",
         "args": {"recipe": {"required": False, "type": "string"}},
@@ -872,11 +809,7 @@ def _schema_cognition_unit(name: str, schema: dict[str, Any]) -> str:
         }
     ):
         return "status"
-    if (
-        "Plan" in result
-        or name.endswith("dry-run")
-        or name in {"xctx validate", "xctx next"}
-    ):
+    if "Plan" in result or name.endswith("dry-run"):
         return "plan"
     if "Audit" in result or "RunList" in result or name == "xctx observe":
         return "audit"
@@ -995,13 +928,9 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
         },
         "xctx dry-run": {
             "structured_input": {
-                "fixture": "path?",
                 "ticker": "ticker?",
                 "ohlcv_series_id": "integer?",
                 "db": CANONICAL_DB,
-                "source": "fixture|live",
-                "omit_kind": ["evidence_kind"],
-                "defer_kind": ["evidence_kind"],
                 "api_key": "string?",
                 "base_url": "https://api.massive.com",
                 "bar_grain": "1d|1m|30m",
@@ -1010,37 +939,17 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
             "argv": [
                 "xctx",
                 "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--source",
-                "{source}",
+                "--ohlcv-series-id",
+                "{ohlcv_series_id}",
                 "--max-rounds",
                 "{max_rounds}",
-            ],
-            "omit_kind_argv": [
-                "xctx",
-                "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--omit-kind",
-                "{kind}",
-            ],
-            "defer_kind_argv": [
-                "xctx",
-                "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--defer-kind",
-                "{kind}",
             ],
             "source_checkout_argv": [
                 "./stock_universe.cli",
                 "xctx",
                 "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--source",
-                "{source}",
+                "--ohlcv-series-id",
+                "{ohlcv_series_id}",
                 "--max-rounds",
                 "{max_rounds}",
             ],
@@ -1281,29 +1190,6 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "{date}",
             ],
         },
-        "xctx validate": {
-            "structured_input": {
-                "fixture": "path",
-                "omit_kind": ["evidence_kind"],
-                "approve_execution": False,
-            },
-            "argv": ["xctx", "validate", "--fixture", "{fixture}"],
-            "source_checkout_argv": [
-                "./stock_universe.cli",
-                "xctx",
-                "validate",
-                "--fixture",
-                "{fixture}",
-            ],
-            "omit_kind_argv": [
-                "xctx",
-                "validate",
-                "--fixture",
-                "{fixture}",
-                "--omit-kind",
-                "{kind}",
-            ],
-        },
         "xctx doctor": {
             "structured_input": {
                 "db": CANONICAL_DB,
@@ -1388,49 +1274,6 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
             "argv": ["xctx", "examples"],
             "source_checkout_argv": ["./stock_universe.cli", "xctx", "examples"],
         },
-        "xctx next": {
-            "structured_input": {
-                "fixture": "path",
-                "omit_kind": ["evidence_kind"],
-                "approve_execution": False,
-            },
-            "argv": ["xctx", "next", "--fixture", "{fixture}"],
-            "source_checkout_argv": [
-                "./stock_universe.cli",
-                "xctx",
-                "next",
-                "--fixture",
-                "{fixture}",
-            ],
-            "omit_kind_argv": [
-                "xctx",
-                "next",
-                "--fixture",
-                "{fixture}",
-                "--omit-kind",
-                "{kind}",
-            ],
-        },
-        "xctx repair": {
-            "structured_input": {"fixture": "path", "omit_kind": ["evidence_kind"]},
-            "argv": [
-                "xctx",
-                "repair",
-                "--fixture",
-                "{fixture}",
-                "--omit-kind",
-                "{kind}",
-            ],
-            "source_checkout_argv": [
-                "./stock_universe.cli",
-                "xctx",
-                "repair",
-                "--fixture",
-                "{fixture}",
-                "--omit-kind",
-                "{kind}",
-            ],
-        },
         "xctx compose": {
             "structured_input": {"recipe": "recipe-name?"},
             "argv": ["xctx", "compose"],
@@ -1445,16 +1288,6 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
             "argv": ["stock-universe", "doctor"],
             "source_checkout_argv": ["./stock_universe.cli", "doctor"],
             "db_override_argv": ["stock-universe", "doctor", "--db", "{db}"],
-        },
-        "stock-universe inspect-plan": {
-            "structured_input": {"fixture": "path"},
-            "argv": ["stock-universe", "inspect-plan", "--fixture", "{fixture}"],
-            "source_checkout_argv": [
-                "./stock_universe.cli",
-                "inspect-plan",
-                "--fixture",
-                "{fixture}",
-            ],
         },
         "stock-universe identity-search": {
             "structured_input": {
@@ -1566,10 +1399,8 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
         },
         "stock-universe dry-run": {
             "structured_input": {
-                "fixture": "path?",
                 "ticker": "ticker?",
                 "ohlcv_series_id": "integer?",
-                "source": "fixture|live",
                 "db": CANONICAL_DB,
                 "api_key": "string?",
                 "base_url": "https://api.massive.com",
@@ -1578,16 +1409,13 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "bar_grain": "1d|1m|30m",
                 "identity_as_of_date": "date?",
                 "max_rounds": DEFAULT_MAX_ROUNDS,
-                "legacy_json_out": "path?",
                 "markdown_out": "path?",
             },
             "argv": [
                 "stock-universe",
                 "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--source",
-                "{source}",
+                "--ohlcv-series-id",
+                "{ohlcv_series_id}",
                 "--max-rounds",
                 "{max_rounds}",
             ],
@@ -1617,23 +1445,11 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "--max-rounds",
                 "{max_rounds}",
             ],
-            "report_argv": [
-                "stock-universe",
-                "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--legacy-json-out",
-                "{legacy_json_out}",
-                "--markdown-out",
-                "{markdown_out}",
-            ],
             "source_checkout_argv": [
                 "./stock_universe.cli",
                 "dry-run",
-                "--fixture",
-                "{fixture}",
-                "--source",
-                "{source}",
+                "--ohlcv-series-id",
+                "{ohlcv_series_id}",
                 "--max-rounds",
                 "{max_rounds}",
             ],
@@ -1642,7 +1458,6 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
             "structured_input": {
                 "db": CANONICAL_DB,
                 "ticker": ["ticker"],
-                "fixture": ["path"],
                 "ohlcv_series_id": ["integer"],
                 "api_key": "string?",
                 "base_url": "https://api.massive.com",
@@ -1664,13 +1479,6 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "{ticker}",
                 "--bar-grain",
                 "{bar_grain}",
-                "--strict",
-            ],
-            "fixture_argv": [
-                "stock-universe",
-                "backfill",
-                "--fixture",
-                "{fixture}",
                 "--strict",
             ],
             "ohlcv_series_id_argv": [
@@ -1720,6 +1528,7 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "identity_as_of_date": "date?",
                 "limit": 25,
                 "offset": 0,
+                "all_pages": False,
                 "api_key": "string?",
                 "base_url": "https://api.massive.com",
                 "from_date": "date?",
@@ -1740,6 +1549,15 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "--offset",
                 "{offset}",
             ],
+            "all_pages_argv": [
+                "stock-universe",
+                "backfill-reference-batch",
+                "--page-size",
+                "{limit}",
+                "--offset",
+                "{offset}",
+                "--all-pages",
+            ],
             "commit_argv": [
                 "stock-universe",
                 "backfill-reference-batch",
@@ -1750,6 +1568,17 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "--commit",
                 "--strict",
             ],
+            "all_pages_commit_argv": [
+                "stock-universe",
+                "backfill-reference-batch",
+                "--page-size",
+                "{limit}",
+                "--offset",
+                "{offset}",
+                "--all-pages",
+                "--commit",
+                "--strict",
+            ],
             "progress_commit_argv": [
                 "stock-universe",
                 "backfill-reference-batch",
@@ -1757,6 +1586,21 @@ def xctx_binding_maps() -> dict[str, dict[str, Any]]:
                 "{limit}",
                 "--offset",
                 "{offset}",
+                "--commit",
+                "--strict",
+                "--heartbeat-seconds",
+                "{heartbeat_seconds}",
+                "--summary-seconds",
+                "{summary_seconds}",
+            ],
+            "all_pages_progress_commit_argv": [
+                "stock-universe",
+                "backfill-reference-batch",
+                "--page-size",
+                "{limit}",
+                "--offset",
+                "{offset}",
+                "--all-pages",
                 "--commit",
                 "--strict",
                 "--heartbeat-seconds",
@@ -2312,12 +2156,6 @@ def xctx_transition_graph() -> list[dict[str, Any]]:
             "command": "stock-universe validate-db",
         },
         {
-            "name": "validate",
-            "from": "seed_input",
-            "to": "ResultEnvelope",
-            "command": "xctx validate",
-        },
-        {
             "name": "dry-run",
             "from": "seed_input",
             "to": "DryRunPlan",
@@ -2360,18 +2198,6 @@ def xctx_transition_graph() -> list[dict[str, Any]]:
             "command": "xctx observe",
         },
         {
-            "name": "repair",
-            "from": "RepairError",
-            "to": "repair_action",
-            "command": "xctx repair",
-        },
-        {
-            "name": "next",
-            "from": "ResultEnvelope",
-            "to": "NextAction",
-            "command": "xctx next",
-        },
-        {
             "name": "compose",
             "from": "transitions",
             "to": "Recipe",
@@ -2384,24 +2210,6 @@ def xctx_recipes() -> list[dict[str, Any]]:
     """Return workflow recipes composed from executable-context transitions."""
     return _normalize_recipe_commands(
         [
-            {
-                "name": "fixture-live-backfill",
-                "description": "Plan, execute, validate, and observe a fixture-seeded live backfill.",
-                "steps": [
-                    {"transition": "doctor", "command": "stock-universe doctor"},
-                    {
-                        "transition": "dry-run",
-                        "command": "xctx dry-run --source live --fixture {fixture}",
-                    },
-                    {"transition": "next", "command": "xctx next --fixture {fixture}"},
-                    {
-                        "transition": "run",
-                        "command": "stock-universe backfill --fixture {fixture} --strict",
-                        "agent_reporting": backfill_reporting_policy(),
-                    },
-                    {"transition": "observe", "command": "xctx observe"},
-                ],
-            },
             {
                 "name": "ticker-live-backfill",
                 "description": "Resolve ticker seed facts, execute through the approved CLI, then audit receipts.",
@@ -2560,6 +2368,31 @@ def xctx_recipes() -> list[dict[str, Any]]:
                 ],
             },
             {
+                "name": "reference-exchange-all-pages-backfill",
+                "description": "Refresh status, internally page every matching persisted exchange series, commit them, then validate and audit.",
+                "steps": [
+                    {
+                        "transition": "universe-status",
+                        "command": "xctx universe-status",
+                    },
+                    {
+                        "transition": "backfill-reference-batch",
+                        "command": "stock-universe backfill-reference-batch --exchange {exchange} --market {market} --bar-grain {bar_grain} --page-size {page_size} --all-pages",
+                    },
+                    {
+                        "transition": "backfill-reference-batch",
+                        "command": "stock-universe backfill-reference-batch --exchange {exchange} --market {market} --bar-grain {bar_grain} --page-size {page_size} --all-pages --commit --strict",
+                        "agent_reporting": backfill_reference_batch_reporting_policy(),
+                    },
+                    {
+                        "transition": "validate-db",
+                        "command": "stock-universe validate-db",
+                        "agent_reporting": validate_db_reporting_policy(),
+                    },
+                    {"transition": "quality-audit", "command": "xctx quality-audit"},
+                ],
+            },
+            {
                 "name": "stock-universe-health-check",
                 "description": "Answer current stock-universe status and catch-up need with compact read-oriented outputs.",
                 "steps": [
@@ -2687,21 +2520,6 @@ def xctx_recipes() -> list[dict[str, Any]]:
                     {"transition": "observe", "command": "xctx observe --limit 50"},
                 ],
             },
-            {
-                "name": "repair-evidence-gap",
-                "description": "Turn unresolved evidence into an explicit repair path.",
-                "steps": [
-                    {
-                        "transition": "dry-run",
-                        "command": "xctx dry-run --fixture {fixture} --defer-kind {kind}",
-                    },
-                    {
-                        "transition": "repair",
-                        "command": "xctx repair --fixture {fixture} --omit-kind {kind}",
-                    },
-                    {"transition": "next", "command": "xctx next --fixture {fixture}"},
-                ],
-            },
         ]
     )
 
@@ -2731,9 +2549,9 @@ def xctx_tool_manifest() -> dict[str, Any]:
             './stock_universe.cli xctx schema --command "xctx bars"',
             "./stock_universe.cli xctx examples",
             "./stock_universe.cli xctx compose --recipe bar-provenance-audit",
-            "./stock_universe.cli xctx dry-run --fixture tests/fixtures/legacy_plans/simple_current_sfbc.json",
-            "./stock_universe.cli xctx next --fixture tests/fixtures/legacy_plans/simple_current_sfbc.json",
-            "./stock_universe.cli backfill --fixture <fixture> --strict",
+            "./stock_universe.cli xctx resolve-identity --source db --query NVDA",
+            "./stock_universe.cli xctx dry-run --ohlcv-series-id <ohlcv_series_id>",
+            "./stock_universe.cli backfill --ohlcv-series-id <ohlcv_series_id> --strict",
             "./stock_universe.cli xctx observe",
         ],
         "core_loop": [
@@ -2749,7 +2567,6 @@ def xctx_tool_manifest() -> dict[str, Any]:
             "examples",
             "resolve-identity",
             "bars",
-            "validate",
             "dry-run",
             "run",
             "catch-up-run",

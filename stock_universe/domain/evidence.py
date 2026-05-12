@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,8 +35,8 @@ class AliasHistoryFact:
         object.__setattr__(self, "spans", freeze_json(normalized))
 
     @classmethod
-    def from_legacy_segments(
-        cls, segments: list[dict[str, Any]], source: str = "legacy_plan_json"
+    def from_segments_payload(
+        cls, segments: list[dict[str, Any]], source: str = "plan_payload"
     ) -> "AliasHistoryFact":
         alias_spans = [
             segment
@@ -45,12 +46,12 @@ class AliasHistoryFact:
         ]
         return cls(alias_spans, source)
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {"spans": unfreeze_json(self.spans)}
 
     def to_evidence_fact(self, series_id: int | str) -> EvidenceFact:
         return EvidenceFact(
-            "alias_history", (str(series_id),), self.to_legacy_dict(), self.source
+            "alias_history", (str(series_id),), self.to_payload(), self.source
         )
 
 
@@ -62,7 +63,7 @@ class EvidenceRequest:
     def __post_init__(self) -> None:
         object.__setattr__(self, "key", tuple(str(item) for item in self.key))
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {"kind": self.kind, "key": list(self.key)}
 
 
@@ -88,7 +89,7 @@ class EvidenceFact:
             payload["matches"] = []
         return payload
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
             "key": list(self.key),
@@ -145,8 +146,8 @@ class TickerEventFact:
         )
 
     @classmethod
-    def from_legacy_event_lookup(
-        cls, payload: dict[str, Any], source: str = "legacy_plan_json"
+    def from_event_lookup_payload(
+        cls, payload: dict[str, Any], source: str = "plan_payload"
     ) -> "TickerEventFact":
         return cls(
             identifier=str(payload.get("identifier") or ""),
@@ -159,7 +160,7 @@ class TickerEventFact:
             source=source,
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "api_status": self.api_status,
             "event_cik": self.event_cik,
@@ -174,7 +175,7 @@ class TickerEventFact:
         return EvidenceFact(
             "ticker_events",
             (str(series_id), self.identifier),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -193,7 +194,7 @@ class ReferenceBoundaryFact:
         object.__setattr__(self, "as_of_date", parse_date(self.as_of_date))
         object.__setattr__(self, "payload", freeze_json(self.payload))
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "api_status": self.api_status,
             "as_of_date": self.as_of_date.isoformat(),
@@ -207,7 +208,7 @@ class ReferenceBoundaryFact:
         return EvidenceFact(
             "reference_boundary",
             (str(series_id), self.ticker, self.as_of_date.isoformat()),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -225,7 +226,7 @@ class BarProbeFact:
         object.__setattr__(self, "from_date", parse_date(self.from_date))
         object.__setattr__(self, "to_date", parse_date(self.to_date))
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "api_status": self.api_status,
             "bar_count": self.bar_count,
@@ -243,7 +244,7 @@ class BarProbeFact:
                 self.from_date.isoformat(),
                 self.to_date.isoformat(),
             ),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -262,7 +263,7 @@ class OmittedSegmentFact:
         object.__setattr__(self, "to_date", parse_date(self.to_date))
         object.__setattr__(self, "proof", freeze_json(self.proof))
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "from_date": self.from_date.isoformat(),
             "reason": self.reason,
@@ -283,7 +284,7 @@ class OmittedSegmentFact:
                 self.from_date.isoformat(),
                 self.to_date.isoformat(),
             ),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -301,7 +302,7 @@ class TerminalCoverageFact:
         object.__setattr__(self, "from_date", parse_date(self.from_date))
         object.__setattr__(self, "to_date", parse_date(self.to_date))
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "from_date": self.from_date.isoformat(),
             "reason": self.reason,
@@ -318,7 +319,7 @@ class TerminalCoverageFact:
                 self.from_date.isoformat(),
                 self.to_date.isoformat(),
             ),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -346,8 +347,8 @@ class TickerReplacementFact:
         object.__setattr__(self, "metadata", freeze_json(self.metadata))
 
     @classmethod
-    def from_legacy_segment(
-        cls, segment: dict[str, Any], source: str = "legacy_plan_json"
+    def from_segment_payload(
+        cls, segment: dict[str, Any], source: str = "plan_payload"
     ) -> "TickerReplacementFact":
         replacement = segment["ticker_replacement"]
         return cls(
@@ -378,7 +379,7 @@ class TickerReplacementFact:
             },
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "event_date": date_text(self.event_date),
             "from_date": self.from_date.isoformat(),
@@ -401,7 +402,7 @@ class TickerReplacementFact:
                 self.from_date.isoformat(),
                 self.to_date.isoformat(),
             ),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -430,8 +431,8 @@ class HandoffSegmentFact:
         object.__setattr__(self, "extra", freeze_json(self.extra))
 
     @classmethod
-    def from_legacy_segment(
-        cls, segment: dict[str, Any], source: str = "legacy_plan_json"
+    def from_segment_payload(
+        cls, segment: dict[str, Any], source: str = "plan_payload"
     ) -> "HandoffSegmentFact":
         known_fields = {
             "event_date",
@@ -457,7 +458,7 @@ class HandoffSegmentFact:
             },
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "event_date": date_text(self.event_date),
             "event_ticker_handoff": unfreeze_json(self.event_ticker_handoff),
@@ -479,7 +480,7 @@ class HandoffSegmentFact:
                 self.from_date.isoformat(),
                 self.to_date.isoformat(),
             ),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -495,7 +496,7 @@ class IdentityScanFact:
         object.__setattr__(self, "as_of_date", parse_date(self.as_of_date))
         object.__setattr__(self, "matches", freeze_json(self.matches))
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         matches = [] if self.matches == () else unfreeze_json(self.matches)
         return {
             "as_of_date": self.as_of_date.isoformat(),
@@ -507,7 +508,7 @@ class IdentityScanFact:
         return EvidenceFact(
             "identity_scan",
             (str(series_id), self.query, self.as_of_date.isoformat()),
-            self.to_legacy_dict(),
+            self.to_payload(),
             self.source,
         )
 
@@ -541,7 +542,7 @@ class EvidenceLedger:
 
     @property
     def ledger_hash(self) -> str:
-        return stable_json_hash([fact.to_legacy_dict() for fact in self.facts])
+        return stable_json_hash([fact.to_payload() for fact in self.facts])
 
     def snapshot(self) -> EvidenceSnapshot:
         return EvidenceSnapshot(facts=self.facts, ledger_hash=self.ledger_hash)

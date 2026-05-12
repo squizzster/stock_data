@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from stock_universe.domain import (
     BackfillPlan,
@@ -63,6 +66,50 @@ def test_schema_seeds_market_session_calendar_from_us_market_hours(
     validation = repository.validate()
     assert validation.ok is True
     assert "market session calendar seeded from us_market_hours.json" in validation.checks
+
+
+def test_schema_rejects_non_fresh_db_without_metadata(tmp_path: Path) -> None:
+    db = tmp_path / "stock_universe.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE unrelated_data(id INTEGER PRIMARY KEY)")
+
+    repository = SQLiteStockUniverseRepository(db)
+
+    with pytest.raises(RuntimeError, match="not fresh"):
+        repository.ensure_schema()
+
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'unrelated_data'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_schema_rejects_incompatible_schema_version_without_resetting(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "stock_universe.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE schema_metadata(key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("CREATE TABLE retained_data(id INTEGER PRIMARY KEY)")
+        conn.execute(
+            "INSERT INTO schema_metadata(key, value) VALUES ('schema_version', 'stock_universe_sqlite.v0')"
+        )
+
+    repository = SQLiteStockUniverseRepository(db)
+
+    with pytest.raises(RuntimeError, match="Unsupported stock-universe SQLite schema"):
+        repository.ensure_schema()
+
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'retained_data'"
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_daily_bar_is_session_canonical_and_raw_payload_is_sidecar(

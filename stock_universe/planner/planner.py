@@ -21,7 +21,6 @@ from stock_universe.domain import (
 from stock_universe.planner.decisions import (
     _assign_status,
     _derived_fact_decisions,
-    _legacy_decisions,
     _validate_segment_boundaries,
     _validate_segment_identity_flags,
 )
@@ -50,17 +49,17 @@ def plan_backfill(evidence: EvidenceSnapshot) -> BackfillPlan | EvidenceNeeded:
         )
 
     target_payload = evidence.get_one("target_identity").payload_value()  # type: ignore[union-attr]
-    target = TargetIdentity.from_legacy_dict(target_payload)
+    target = TargetIdentity.from_payload(target_payload)
     request_payload = evidence.get_one("backfill_request").payload_value()  # type: ignore[union-attr]
-    request = BackfillRequest.from_legacy_dict(target.ohlcv_series_id, request_payload)
+    request = BackfillRequest.from_payload(target.ohlcv_series_id, request_payload)
     aliases = tuple(
-        KnownAlias.from_legacy_dict(item)
+        KnownAlias.from_payload(item)
         for item in evidence.get_one("known_aliases").payload_value()  # type: ignore[union-attr]
     )
     candidate_segments_fact = evidence.get_one("candidate_segments")
     if candidate_segments_fact:
         segments = tuple(
-            PlannedSegment.from_legacy_dict(item)
+            PlannedSegment.from_payload(item)
             for item in candidate_segments_fact.payload_value()
         )
     else:
@@ -73,10 +72,7 @@ def plan_backfill(evidence: EvidenceSnapshot) -> BackfillPlan | EvidenceNeeded:
     event_lookup = event_lookup_fact.payload_value() if event_lookup_fact else {}
 
     decisions: list[RuleDecision] = []
-    legacy_decisions = _legacy_decisions(evidence)
-    decisions.extend(legacy_decisions)
-    if not legacy_decisions:
-        decisions.extend(_derived_fact_decisions(evidence))
+    decisions.extend(_derived_fact_decisions(evidence))
     decisions.extend(_validate_segment_boundaries(request, segments))
     if not segments:
         decisions.append(

@@ -703,7 +703,7 @@ def test_massive_alias_history_provider_finds_deep_valid_suffix_without_linear_s
     )
 
 
-def test_massive_alias_history_suffix_search_matches_legacy_linear_result_inside_cap() -> (
+def test_massive_alias_history_suffix_search_matches_prior_linear_result_inside_cap() -> (
     None
 ):
     target = TargetIdentity(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -133,7 +134,7 @@ class TargetIdentity:
         object.__setattr__(self, "extra", freeze_json(self.extra))
 
     @classmethod
-    def from_legacy_dict(cls, payload: dict[str, Any]) -> "TargetIdentity":
+    def from_payload(cls, payload: dict[str, Any]) -> "TargetIdentity":
         known_fields = {
             "ohlcv_series_id",
             "company_id",
@@ -182,7 +183,7 @@ class TargetIdentity:
             extra=extra,
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "cik": self.cik,
             "company_id": self.company_id,
@@ -226,7 +227,7 @@ class KnownAlias:
         object.__setattr__(self, "extra", freeze_json(self.extra))
 
     @classmethod
-    def from_legacy_dict(cls, payload: dict[str, Any]) -> "KnownAlias":
+    def from_payload(cls, payload: dict[str, Any]) -> "KnownAlias":
         known_fields = {
             "symbol_text",
             "ticker",
@@ -248,7 +249,7 @@ class KnownAlias:
             },
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "active": self.active,
             "as_of_date": date_text(self.as_of_date),

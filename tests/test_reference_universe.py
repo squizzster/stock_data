@@ -325,8 +325,8 @@ def test_series_id_seed_facts_preserve_selected_reference_identity(
         snapshot, from_date="2024-01-01", to_date="2024-01-31"
     )
     by_kind = {fact.kind: fact.payload_value() for fact in facts}
-    target = TargetIdentity.from_legacy_dict(by_kind["target_identity"])
-    request = BackfillRequest.from_legacy_dict(
+    target = TargetIdentity.from_payload(by_kind["target_identity"])
+    request = BackfillRequest.from_payload(
         target.ohlcv_series_id, by_kind["backfill_request"]
     )
 
@@ -421,7 +421,7 @@ def test_stock_universe_dry_run_series_id_loads_selected_db_identity(
         target_fact = next(
             fact for fact in source.initial_facts() if fact.kind == "target_identity"
         )
-        target = TargetIdentity.from_legacy_dict(target_fact.payload_value())
+        target = TargetIdentity.from_payload(target_fact.payload_value())
         assert target.latest_ticker == "GOOG"
         result = EvidenceNeeded(requests=())
         return DryRunPlanningTrace(
@@ -466,7 +466,7 @@ def test_xctx_dry_run_series_id_loads_selected_db_identity(
         target_fact = next(
             fact for fact in source.initial_facts() if fact.kind == "target_identity"
         )
-        target = TargetIdentity.from_legacy_dict(target_fact.payload_value())
+        target = TargetIdentity.from_payload(target_fact.payload_value())
         assert target.latest_ticker == "GOOG"
         result = EvidenceNeeded(requests=())
         return DryRunPlanningTrace(
@@ -586,6 +586,53 @@ def test_reference_batch_dry_run_enumerates_db_series_ids_without_api_key(
     )
     assert commit_action["requires_approval"] is True
     assert "ticker" not in commit_action["command"]["args"]
+
+
+def test_reference_batch_all_pages_dry_run_pages_internally(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    db = _committed_reference_db(monkeypatch, tmp_path, capsys)
+
+    assert (
+        stock_universe_main(
+            [
+                "backfill-reference-batch",
+                "--db",
+                str(db),
+                "--exchange",
+                "XNAS",
+                "--limit",
+                "1",
+                "--all-pages",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is True
+    assert payload["dry_run"] is True
+    assert payload["selection"]["all_pages"] is True
+    assert payload["counts"]["total_available"] == 3
+    assert payload["counts"]["selected"] == 3
+    assert payload["counts"]["pending"] == 0
+    assert payload["counts"]["page_count"] == 3
+    assert [page["offset"] for page in payload["pages"]] == [0, 1, 2]
+    assert [page["selected"] for page in payload["pages"]] == [1, 1, 1]
+    assert [item["ticker"] for item in payload["selected_snapshots"]] == [
+        "GOOG",
+        "GOOGL",
+        "GOOX",
+    ]
+    assert payload["pending_items"] == []
+    assert payload["next_action"] == "commit_all_pages"
+    commit_action = next(
+        action
+        for action in payload["next_actions"]
+        if action["name"] == "commit-all-reference-pages"
+    )
+    assert commit_action["command"]["args"]["all_pages"] is True
+    assert commit_action["command"]["args"]["limit"] == 1
 
 
 def test_reference_batch_can_filter_by_common_stock_alias(
@@ -716,6 +763,68 @@ def test_reference_batch_commit_runs_selected_ohlcv_series_ids(
         "finished",
     ]
     assert progress[-1]["counts"]["skipped"] == 1
+
+
+def test_reference_batch_all_pages_commit_runs_every_page(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    db = _committed_reference_db(monkeypatch, tmp_path, capsys)
+
+    def fake_trace(source, *, max_rounds):
+        result = EvidenceNeeded(requests=())
+        return DryRunPlanningTrace(
+            result=result, rounds=(PlanningRound(1, "ledger", result),)
+        )
+
+    monkeypatch.setattr(
+        "stock_universe.cli.run_backfill_source_dry_run_trace", fake_trace
+    )
+
+    assert (
+        stock_universe_main(
+            [
+                "backfill-reference-batch",
+                "--db",
+                str(db),
+                "--exchange",
+                "XNAS",
+                "--limit",
+                "1",
+                "--all-pages",
+                "--commit",
+                "--strict",
+                "--api-key",
+                "secret",
+                "--base-url",
+                "https://example.test",
+            ]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    progress = [
+        json.loads(line.removeprefix("backfill-reference-batch progress: "))
+        for line in captured.err.splitlines()
+        if line.startswith("backfill-reference-batch progress: ")
+    ]
+    event_types = [event["event_type"] for event in progress]
+
+    assert payload["ok"] is False
+    assert payload["selection"]["all_pages"] is True
+    assert payload["counts"]["selected"] == 3
+    assert payload["counts"]["skipped"] == 3
+    assert payload["counts"]["page_count"] == 3
+    assert len(payload["results"]) == 3
+    assert {result["status"] for result in payload["results"]} == {"skipped"}
+    assert payload["next_action"] == "repair_failures"
+    assert event_types[0] == "started"
+    assert event_types.count("page_started") == 3
+    assert event_types.count("page_finished") == 3
+    assert event_types.count("input_started") == 3
+    assert event_types.count("input_finished") == 3
+    assert event_types[-1] == "finished"
+    assert progress[-1]["counts"]["skipped"] == 3
 
 
 def test_reference_batch_empty_db_exposes_reference_update_repair(

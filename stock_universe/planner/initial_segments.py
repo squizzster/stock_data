@@ -305,7 +305,7 @@ def _latest_ticker_terminal_coverage_gaps(
     target_fact = evidence.get_one("target_identity")
     if target_fact is None:
         return ()
-    target = TargetIdentity.from_legacy_dict(target_fact.payload_value())
+    target = TargetIdentity.from_payload(target_fact.payload_value())
     latest_ticker = str(target.latest_ticker or "")
     if not latest_ticker:
         return ()

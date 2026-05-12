@@ -24,7 +24,7 @@ def validate_collected_backfill_facts(
     """Check evidence-source output before planner input.
 
     The contract is intentionally small. It catches collectors that smuggle
-    legacy candidate segments into typed-evidence tests, or emit trusted
+    precomputed candidate segments into typed-evidence tests, or emit trusted
     replacement/handoff facts without boundary validation payloads.
     """
     issues: list[EvidenceContractIssue] = []
@@ -45,7 +45,7 @@ def validate_collected_backfill_facts(
             issues.append(
                 _issue(
                     "candidate_segments_not_allowed",
-                    "Collector emitted legacy candidate segments.",
+                    "Collector emitted precomputed candidate segments.",
                     fact,
                 )
             )
@@ -137,7 +137,7 @@ def _validate_omitted_segment_fact(
                     fact,
                 )
             )
-    if fact.source == "legacy_plan_json":
+    if fact.source == "plan_payload":
         return tuple(issues)
     proof = payload.get("proof") or {}
     for field in (

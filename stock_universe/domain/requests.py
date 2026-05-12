@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,7 +36,7 @@ class BackfillRequest:
         object.__setattr__(self, "timespan", spec.timespan)
 
     @classmethod
-    def from_legacy_dict(
+    def from_payload(
         cls, series_id: int, payload: dict[str, Any]
     ) -> "BackfillRequest":
         if payload.get("bar_grain"):
@@ -60,7 +61,7 @@ class BackfillRequest:
             adjusted=bool(payload.get("adjusted", True)),
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "from_date": self.from_date.isoformat(),
             "to_date": self.to_date.isoformat(),
@@ -72,5 +73,5 @@ class BackfillRequest:
 
     @property
     def request_hash(self) -> str:
-        payload = {"ohlcv_series_id": self.series_id, **self.to_legacy_dict()}
+        payload = {"ohlcv_series_id": self.series_id, **self.to_payload()}
         return stable_json_hash(payload)

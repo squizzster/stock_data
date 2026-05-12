@@ -1,4 +1,4 @@
-"""Compatibility imports for Massive live read-only providers."""
+"""Aggregate imports for Massive live read-only providers."""
 
 from __future__ import annotations
 

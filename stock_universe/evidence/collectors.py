@@ -1,8 +1,6 @@
 """Evidence collector contracts.
 
-Collectors are allowed to know about repositories or providers. The planner is
-not. This module starts with a static source used by offline tests so the live
-provider contract can grow against typed facts instead of legacy plan dicts.
+Collectors are allowed to know about repositories or providers. The planner is not.
 """
 
 from __future__ import annotations
@@ -22,7 +20,6 @@ from stock_universe.evidence.contracts import (
     EvidenceContractIssue,
     validate_collected_backfill_facts,
 )
-from stock_universe.evidence.legacy import facts_from_legacy_plan
 from stock_universe.providers import BackfillProviderSet
 
 
@@ -34,51 +31,6 @@ class BackfillEvidenceSource(Protocol):
         self, requests: tuple[EvidenceRequest, ...]
     ) -> tuple[EvidenceFact, ...]:
         """Return typed facts for planner-requested evidence."""
-
-
-@dataclass(frozen=True)
-class StaticBackfillEvidenceSource:
-    """In-memory evidence source for offline contract and fixture tests."""
-
-    seed_facts: tuple[EvidenceFact, ...]
-    supplemental_facts: tuple[EvidenceFact, ...] = ()
-
-    @classmethod
-    def from_legacy_plan(
-        cls,
-        plan: dict,
-        *,
-        source: str = "legacy_plan_json",
-        include_candidate_segments: bool = False,
-        defer_kinds: tuple[str, ...] = (),
-    ) -> "StaticBackfillEvidenceSource":
-        facts = facts_from_legacy_plan(
-            plan, source, include_candidate_segments=include_candidate_segments
-        )
-        deferred = set(defer_kinds)
-        if not include_candidate_segments:
-            deferred.add("candidate_segments")
-        seed = tuple(fact for fact in facts if fact.kind not in deferred)
-        supplemental = tuple(
-            fact
-            for fact in facts
-            if fact.kind in deferred and fact.kind != "candidate_segments"
-        )
-        return cls(seed, supplemental)
-
-    def initial_facts(self) -> tuple[EvidenceFact, ...]:
-        return self.seed_facts
-
-    def requested_facts(
-        self, requests: tuple[EvidenceRequest, ...]
-    ) -> tuple[EvidenceFact, ...]:
-        requested_kinds = {request.kind for request in requests}
-        return tuple(
-            fact for fact in self.supplemental_facts if fact.kind in requested_kinds
-        )
-
-    def all_facts(self) -> tuple[EvidenceFact, ...]:
-        return self.seed_facts + self.supplemental_facts
 
 
 @dataclass(frozen=True)
@@ -152,9 +104,9 @@ def _request_and_target_from_base_facts(
     facts: tuple[EvidenceFact, ...],
 ) -> tuple[BackfillRequest, TargetIdentity]:
     target_fact = _one_base_fact(facts, "target_identity")
-    target = TargetIdentity.from_legacy_dict(target_fact.payload_value())
+    target = TargetIdentity.from_payload(target_fact.payload_value())
     request_fact = _one_base_fact(facts, "backfill_request")
-    request = BackfillRequest.from_legacy_dict(
+    request = BackfillRequest.from_payload(
         target.ohlcv_series_id, request_fact.payload_value()
     )
     return request, target

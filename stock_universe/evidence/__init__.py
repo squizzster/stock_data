@@ -1,15 +1,13 @@
-"""Evidence collection and compatibility adapters."""
+"""Evidence collection and provider adapters."""
 
 from .collectors import (
     BackfillEvidenceSource,
     EvidenceCollectionError,
     ProviderBackfillEvidenceSource,
-    StaticBackfillEvidenceSource,
     collect_initial_backfill_evidence,
     collect_requested_evidence,
 )
 from .contracts import EvidenceContractIssue, validate_collected_backfill_facts
-from .legacy import facts_from_legacy_plan, ledger_from_legacy_plan
 from .normalizers import (
     bar_probe_fact_from_result,
     handoff_segment_fact_from_target_valid_event_window,
@@ -24,11 +22,8 @@ __all__ = [
     "EvidenceCollectionError",
     "EvidenceContractIssue",
     "ProviderBackfillEvidenceSource",
-    "StaticBackfillEvidenceSource",
     "collect_initial_backfill_evidence",
     "collect_requested_evidence",
-    "facts_from_legacy_plan",
-    "ledger_from_legacy_plan",
     "bar_probe_fact_from_result",
     "handoff_segment_fact_from_target_valid_event_window",
     "identity_scan_fact_from_result",

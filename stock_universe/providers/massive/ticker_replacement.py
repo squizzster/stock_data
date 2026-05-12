@@ -5,7 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import urllib.parse
 from dataclasses import dataclass
+from typing import Any
 
+from stock_universe import security_names
 from stock_universe.domain import (
     BackfillRequest,
     EvidenceFact,
@@ -18,7 +20,6 @@ from stock_universe.domain.records import unfreeze_json
 from stock_universe.evidence.normalizers import (
     ticker_replacement_fact_from_target_valid_alias_window,
 )
-from stock_universe import security_names
 from stock_universe.market_calendar import (
     first_us_equity_trading_date_on_or_after,
     next_us_equity_trading_date,
@@ -442,8 +443,8 @@ def _target_valid_alias_window_with_overrides(
         return None
     reason = replacement_reason
     validation = (
-        _segment_validation_row(start_fact.to_legacy_dict(), "start"),
-        _segment_validation_row(end_fact.to_legacy_dict(), "end"),
+        _segment_validation_row(start_fact.to_payload(), "start"),
+        _segment_validation_row(end_fact.to_payload(), "end"),
     )
     fact = TickerReplacementFact(
         old_ticker=old_ticker,

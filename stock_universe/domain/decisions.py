@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from .common import DecisionOutcome
 
@@ -21,7 +22,7 @@ class RuleDecision:
             self, "evidence_refs", tuple(str(item) for item in self.evidence_refs)
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return {
             "decision_id": self.decision_id,
             "rule_name": self.rule_name,

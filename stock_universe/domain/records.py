@@ -1,8 +1,4 @@
-"""Compatibility imports for immutable domain records.
-
-New code may import focused modules such as stock_universe.domain.plans,
-but the original stock_universe.domain.records surface remains stable.
-"""
+"""Aggregate imports for immutable domain records."""
 
 from .common import (
     BarGrain,

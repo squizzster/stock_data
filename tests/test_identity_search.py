@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from stock_universe.cli import main as stock_universe_main
-from stock_universe.evidence import ledger_from_legacy_plan
-from stock_universe.planner import plan_backfill
-from stock_universe.domain import BackfillRequest
 from stock_universe.providers import (
     HttpJsonResponse,
     MassiveProviderConfig,
@@ -20,9 +16,6 @@ from stock_universe.storage import (
 )
 from stock_universe.workflows import live_identity_search, sqlite_identity_search
 from stock_universe.xctx.cli import main as xctx_main
-
-
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "legacy_plans"
 
 
 class FakeIdentitySearchTransport:
@@ -266,18 +259,21 @@ def test_live_identity_search_ticker_exact_precedes_prefix_matches() -> None:
 
 def test_sqlite_identity_search_reads_persisted_series_id(tmp_path: Path) -> None:
     db = tmp_path / "stock_universe.sqlite"
-    legacy = json.loads(
-        (FIXTURE_DIR / "simple_current_sfbc.json").read_text(encoding="utf-8")
-    )
-    plan = plan_backfill(ledger_from_legacy_plan(legacy).snapshot())
     repository = SQLiteStockUniverseRepository(db)
-    plan = _plan_with_allocated_lookup(repository, plan)
-    repository.persist_plan_context(plan)
+    snapshot = _stored_reference_snapshot(
+        "SFBC",
+        "Sound Financial Bancorp Inc.",
+        "0001495925",
+        "BBG000SFBC01",
+        "BBG000SFBC02",
+    )
+    repository.upsert_reference_snapshots([snapshot])
+    series_id = repository.lookup_ohlcv_series_id(snapshot.natural_key)
 
     result = sqlite_identity_search(db, "SFBC")
     candidate = result.candidates[0].to_dict()
 
-    assert candidate["ohlcv_series_id"] == plan.target.ohlcv_series_id
+    assert candidate["ohlcv_series_id"] == series_id
     assert candidate["lookup_status"] == "resolved"
     assert candidate["ticker"] == "SFBC"
     assert candidate["match_reason"] == "ticker_exact_case"
@@ -464,13 +460,15 @@ def test_xctx_resolve_identity_db_candidates_use_series_id_dry_run(
     tmp_path: Path, capsys
 ) -> None:
     db = tmp_path / "stock_universe.sqlite"
-    legacy = json.loads(
-        (FIXTURE_DIR / "simple_current_sfbc.json").read_text(encoding="utf-8")
-    )
-    plan = plan_backfill(ledger_from_legacy_plan(legacy).snapshot())
     repository = SQLiteStockUniverseRepository(db)
-    plan = _plan_with_allocated_lookup(repository, plan)
-    repository.persist_plan_context(plan)
+    snapshot = _stored_reference_snapshot(
+        "SFBC",
+        "Sound Financial Bancorp Inc.",
+        "0001495925",
+        "BBG000SFBC01",
+        "BBG000SFBC02",
+    )
+    repository.upsert_reference_snapshots([snapshot])
 
     assert (
         xctx_main(
@@ -510,20 +508,6 @@ def test_xctx_resolve_identity_db_candidates_use_series_id_dry_run(
     )
     assert dry_run_action["command"]["args"]["db"] == str(db)
     assert "ticker is an alias" in dry_run_action["reason"]
-
-
-def _plan_with_allocated_lookup(repository: SQLiteStockUniverseRepository, plan):
-    series_id = repository.ensure_ohlcv_series_id(plan.target.natural_key)
-    target = replace(plan.target, ohlcv_series_id=series_id)
-    request = BackfillRequest(
-        series_id=series_id,
-        from_date=plan.request.from_date,
-        to_date=plan.request.to_date,
-        multiplier=plan.request.multiplier,
-        timespan=plan.request.timespan,
-        adjusted=plan.request.adjusted,
-    )
-    return replace(plan, target=target, request=request)
 
 
 def _alphabet_payload() -> dict:

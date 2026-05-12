@@ -54,7 +54,7 @@ class BackfillPlan:
             if decision.outcome == "block"
         )
 
-    def to_legacy_dict(self) -> dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         result = {
             "api_requests": self.api_requests,
             "errors": list(self.errors),
@@ -62,13 +62,13 @@ class BackfillPlan:
             "generated_at_utc": self.created_at_utc,
             "identity_discovery": unfreeze_json(self.identity_discovery),
             "known_aliases_from_db": [
-                alias.to_legacy_dict() for alias in self.known_aliases
+                alias.to_payload() for alias in self.known_aliases
             ],
-            "range": self.request.to_legacy_dict(),
+            "range": self.request.to_payload(),
             "raw_dir": self.raw_dir,
-            "segments": [segment.to_legacy_dict() for segment in self.segments],
+            "segments": [segment.to_payload() for segment in self.segments],
             "status": self.status,
-            "target": self.target.to_legacy_dict(),
+            "target": self.target.to_payload(),
             "warnings": list(self.warnings),
         }
         plan_files = unfreeze_json(self.plan_files)

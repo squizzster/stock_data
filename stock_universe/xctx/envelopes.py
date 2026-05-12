@@ -34,7 +34,7 @@ def result_envelope(
             "result_type": "BackfillPlan",
             "status": result.status,
             "evidence_ledger_hash": result.evidence_ledger_hash,
-            "decisions": [decision.to_legacy_dict() for decision in result.decisions],
+            "decisions": [decision.to_payload() for decision in result.decisions],
             "next_actions": [
                 action.to_dict()
                 for action in _plan_next_actions(
@@ -64,14 +64,14 @@ def result_envelope(
         "ok": False,
         "command": command,
         "result_type": "EvidenceNeeded",
-        "requests": [request.to_legacy_dict() for request in result.requests],
-        "decisions": [decision.to_legacy_dict() for decision in result.decisions],
+        "requests": [request.to_payload() for request in result.requests],
+        "decisions": [decision.to_payload() for decision in result.decisions],
         "next_actions": [
             _next_action(
                 "collect-missing-evidence",
                 "command",
                 "xctx dry-run",
-                "Collect additional requested evidence and rerun planning.",
+                "Collect requested provider/repository evidence and rerun planning.",
                 effects=(
                     EffectSpec(
                         "read",
@@ -93,19 +93,6 @@ def result_envelope(
     repairs = _evidence_repairs(result)
     if repairs:
         envelope["repairs"] = [repair.to_dict() for repair in repairs]
-        envelope["next_actions"] = envelope["next_actions"] + [
-            _next_action(
-                "apply-repair",
-                "repair",
-                "xctx repair",
-                "Emit a repair action payload for missing evidence.",
-                effects=(
-                    EffectSpec(
-                        "none", "stdout", "Describe a repair; no mutation is performed."
-                    ),
-                ),
-            ).to_dict()
-        ]
     return envelope
 
 
@@ -121,17 +108,17 @@ def _plan_next_actions(
     if plan.status == "blocked":
         return [
             _next_action(
-                "inspect-decision",
+                "review-planning-envelope",
                 "inspection",
-                "xctx next",
-                "Inspect blocking planner decisions.",
+                "xctx dry-run",
+                "Inspect blocking planner decisions in the dry-run envelope.",
                 effects=(EffectSpec("none", "stdout", "Render decision context."),),
             ),
             _next_action(
                 "collect-missing-evidence",
                 "command",
                 "xctx dry-run",
-                "Collect additional requested evidence and rerun planning.",
+                "Collect requested provider/repository evidence and rerun planning.",
                 effects=(
                     EffectSpec(
                         "read",
@@ -147,7 +134,7 @@ def _plan_next_actions(
                 _next_action(
                     "inspect-warnings",
                     "inspection",
-                    "xctx next",
+                    "xctx dry-run",
                     "Inspect warning decisions before execution.",
                     effects=(EffectSpec("none", "stdout", "Render warning context."),),
                 ),
@@ -160,26 +147,32 @@ def _plan_next_actions(
             _next_action(
                 "inspect-warnings",
                 "inspection",
-                "xctx next",
+                "xctx dry-run",
                 "Inspect warning decisions before approval.",
                 effects=(EffectSpec("none", "stdout", "Render warning context."),),
             ),
             _next_action(
-                "approve-provisional-backfill",
-                "approval",
-                "xctx validate",
-                "Approve a caution plan before execution can be offered.",
+                "execute-caution-plan",
+                "execution",
+                "stock-universe backfill",
+                "Execute a caution plan through the production CLI, which persists an execution approval unless --no-caution is supplied.",
                 requires_approval=True,
                 effects=(
                     EffectSpec(
-                        "none",
-                        "approval-record",
-                        "No approval is persisted by xctx yet.",
+                        "read",
+                        "Massive API",
+                        "Collect live bar data for the caution plan.",
+                    ),
+                    EffectSpec(
+                        "write",
+                        "SQLite DB",
+                        "Persist approval, plan, bars, lineage, and receipt.",
                     ),
                 ),
-                command_reads=("fixture",),
-                argv=approval_argv,
-                source_checkout_argv=approval_source_checkout_argv,
+                command_reads=("Massive API",),
+                command_writes=("SQLite DB",),
+                argv=execution_argv,
+                source_checkout_argv=execution_source_checkout_argv,
             ),
         ]
     if execution_approved:
@@ -187,7 +180,7 @@ def _plan_next_actions(
             _next_action(
                 "review-plan",
                 "inspection",
-                "xctx next",
+                "xctx dry-run",
                 "Review the final backfill plan.",
                 effects=(EffectSpec("none", "stdout", "Render plan context."),),
             ),
@@ -199,24 +192,30 @@ def _plan_next_actions(
         _next_action(
             "review-plan",
             "inspection",
-            "xctx next",
+            "xctx dry-run",
             "Review the final backfill plan.",
             effects=(EffectSpec("none", "stdout", "Render plan context."),),
         ),
         _next_action(
-            "approve-plan",
-            "approval",
-            "xctx validate",
-            "Approve a safe plan before execution can be offered.",
+            "execute-plan",
+            "execution",
+            "stock-universe backfill",
+            "Execute the safe plan through the production CLI, which persists an execution approval.",
             requires_approval=True,
             effects=(
                 EffectSpec(
-                    "none", "approval-record", "No approval is persisted by xctx yet."
+                    "read", "Massive API", "Collect live bar data for the safe plan."
+                ),
+                EffectSpec(
+                    "write",
+                    "SQLite DB",
+                    "Persist approval, plan, bars, lineage, and receipt.",
                 ),
             ),
-            command_reads=("fixture",),
-            argv=approval_argv,
-            source_checkout_argv=approval_source_checkout_argv,
+            command_reads=("Massive API",),
+            command_writes=("SQLite DB",),
+            argv=execution_argv,
+            source_checkout_argv=execution_source_checkout_argv,
         ),
     ]
 
@@ -246,7 +245,7 @@ def _evidence_repairs(result: EvidenceNeeded) -> list[RepairAction]:
                 _repair_action(
                     "provide-alias-history",
                     "alias_history",
-                    request.to_legacy_dict(),
+                    request.to_payload(),
                     (
                         "No live alias-history collector is available; provide an explicit AliasHistoryFact "
                         "covering the requested pre-event interval."
@@ -258,7 +257,7 @@ def _evidence_repairs(result: EvidenceNeeded) -> list[RepairAction]:
                 _repair_action(
                     "resolve-coverage-gap",
                     "coverage_gap",
-                    request.to_legacy_dict(),
+                    request.to_payload(),
                     (
                         "Append ticker-replacement, handoff, omitted-segment, or terminal-coverage evidence "
                         "that fully accounts for the requested uncovered interval."
@@ -270,7 +269,7 @@ def _evidence_repairs(result: EvidenceNeeded) -> list[RepairAction]:
                 _repair_action(
                     "provide-terminal-coverage",
                     "terminal_coverage",
-                    request.to_legacy_dict(),
+                    request.to_payload(),
                     (
                         "Append an explicit TerminalCoverageFact proving the final transformed ticker "
                         "validly covers the requested terminal interval."
@@ -357,6 +356,6 @@ def _repair_action(
         ),
         reason=reason,
         command=CommandSpec(
-            "xctx repair", "Emit repair guidance for unresolved evidence."
+            "xctx dry-run", "Rerun planning after evidence-source inputs are available."
         ),
     )

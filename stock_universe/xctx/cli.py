@@ -20,16 +20,7 @@ from stock_universe.cli_runtime import (
     silence_stdout,
 )
 from stock_universe.defaults import DEFAULT_MAX_ROUNDS
-from stock_universe.domain import (
-    BackfillPlan,
-    EvidenceLedger,
-    EvidenceNeeded,
-    normalize_bar_grain,
-)
-from stock_universe.evidence import (
-    StaticBackfillEvidenceSource,
-    ledger_from_legacy_plan,
-)
+from stock_universe.domain import normalize_bar_grain
 from stock_universe.market_calendar import (
     classify_us_equity_session,
     first_us_equity_trading_date_on_or_after,
@@ -38,10 +29,8 @@ from stock_universe.market_calendar import (
     previous_us_equity_trading_date,
 )
 from stock_universe.paths import canonical_db_text
-from stock_universe.planner import plan_backfill
 from stock_universe.providers import MassiveProviderConfig, MassiveReadOnlyClient
 from stock_universe.quality_audit import ISSUE_CATEGORIES, quality_audit
-from stock_universe.reports import legacy_plan_dict
 from stock_universe.storage import connect_readonly_sqlite
 from stock_universe.storage.sqlite_repo import SCHEMA_VERSION
 from stock_universe.universe_status import universe_status
@@ -56,7 +45,6 @@ from stock_universe.workflows import (
     live_identity_search,
     massive_live_source_from_ticker,
     massive_live_source_from_series_id,
-    massive_live_dry_run_source_from_legacy_plan,
     run_backfill_source_dry_run_trace,
     sqlite_identity_search,
 )
@@ -120,9 +108,9 @@ def _parser(*, prog: str = "xctx") -> argparse.ArgumentParser:
               3. {prog} tree
               4. {prog} schema --command "xctx dry-run"
               5. {prog} examples
-              6. {prog} dry-run --fixture tests/fixtures/legacy_plans/simple_current_sfbc.json
-              7. {prog} next --fixture tests/fixtures/legacy_plans/simple_current_sfbc.json
-              8. ./stock_universe.cli backfill --fixture <fixture> --strict
+              6. {prog} resolve-identity --source db --query NVDA
+              7. {prog} dry-run --ohlcv-series-id <ohlcv_series_id>
+              8. ./stock_universe.cli backfill --ohlcv-series-id <ohlcv_series_id> --strict
               9. {prog} observe
 
             Protocol:
@@ -131,7 +119,7 @@ def _parser(*, prog: str = "xctx") -> argparse.ArgumentParser:
               are identifiers, not shell commands.
 
             Read-oriented by default:
-              xctx commands expose schemas, binding maps, dry-runs, repairs, and recipes.
+              xctx commands expose schemas, binding maps, dry-runs, audits, and recipes.
               Write paths are explicit stock-universe commands and require --commit or
               backfill execution.
 
@@ -204,22 +192,10 @@ def _parser(*, prog: str = "xctx") -> argparse.ArgumentParser:
     )
     schema.set_defaults(func=_schema)
 
-    validate = subcommands.add_parser(
-        "validate", help="Validate and envelope an offline fixture plan."
-    )
-    _add_fixture_args(validate)
-    validate.add_argument(
-        "--approve-execution",
-        action="store_true",
-        help="Expose execution after explicit approval.",
-    )
-    validate.set_defaults(func=_validate)
-
     dry_run = subcommands.add_parser(
         "dry-run", help="Run read-oriented adaptive planning."
     )
     dry_run_input = dry_run.add_mutually_exclusive_group(required=True)
-    dry_run_input.add_argument("--fixture", help="Legacy plan fixture/input JSON path.")
     dry_run_input.add_argument(
         "--ticker", help="Resolve a live Massive ticker into seed facts."
     )
@@ -231,22 +207,9 @@ def _parser(*, prog: str = "xctx") -> argparse.ArgumentParser:
         help="Load a selected reference-universe OHLCV series ID from --db.",
     )
     dry_run.add_argument(
-        "--omit-kind",
-        action="append",
-        default=[],
-        help="Remove a fixture evidence kind before planning.",
-    )
-    dry_run.add_argument("--source", choices=("fixture", "live"), default=None)
-    dry_run.add_argument(
         "--db",
         default=canonical_db_text(),
         help="SQLite database path for --ohlcv-series-id. Defaults to the canonical universe DB.",
-    )
-    dry_run.add_argument(
-        "--defer-kind",
-        action="append",
-        default=[],
-        help="Defer a fixture fact kind into collection.",
     )
     dry_run.add_argument(
         "--api-key",
@@ -357,23 +320,6 @@ def _parser(*, prog: str = "xctx") -> argparse.ArgumentParser:
     )
     bars.set_defaults(func=_bars)
 
-    next_command = subcommands.add_parser(
-        "next", help="Return typed next actions for a fixture plan."
-    )
-    _add_fixture_args(next_command)
-    next_command.add_argument(
-        "--approve-execution",
-        action="store_true",
-        help="Expose execution after explicit approval.",
-    )
-    next_command.set_defaults(func=_next)
-
-    repair = subcommands.add_parser(
-        "repair", help="Return repair actions for unresolved fixture evidence."
-    )
-    _add_fixture_args(repair)
-    repair.set_defaults(func=_repair)
-
     universe_status_command = subcommands.add_parser(
         "universe-status",
         help="Report canonical DB universe coverage and completeness.",
@@ -477,18 +423,6 @@ def _parser(*, prog: str = "xctx") -> argparse.ArgumentParser:
     )
     compose.set_defaults(func=_compose)
     return parser
-
-
-def _add_fixture_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--fixture", required=True, help="Legacy plan fixture/input JSON path."
-    )
-    parser.add_argument(
-        "--omit-kind",
-        action="append",
-        default=[],
-        help="Remove an evidence kind before planning.",
-    )
 
 
 def _add_quality_audit_args(parser: argparse.ArgumentParser) -> None:
@@ -899,59 +833,14 @@ def _schema(
     }
 
 
-def _validate(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> dict[str, Any]:
-    result = _plan_fixture_result(args.fixture, args.omit_kind, command="xctx validate")
-    approval_argv = [
-        "./stock_universe.cli",
-        "xctx",
-        "validate",
-        "--fixture",
-        args.fixture,
-        "--approve-execution",
-    ]
-    execution_argv = [
-        "./stock_universe.cli",
-        "backfill",
-        "--fixture",
-        args.fixture,
-        "--strict",
-    ]
-    envelope = result_envelope(
-        "xctx validate",
-        result,
-        execution_approved=args.approve_execution,
-        approval_argv=approval_argv,
-        approval_source_checkout_argv=approval_argv,
-        execution_argv=execution_argv,
-        execution_source_checkout_argv=execution_argv,
-    )
-    envelope["effects"] = _effects(reads=[args.fixture], writes=[])
-    if isinstance(result, BackfillPlan):
-        envelope["plan"] = legacy_plan_dict(result)
-    return envelope
-
-
 def _dry_run(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, Any]:
-    source_name = args.source or (
-        "live" if args.ticker or args.ohlcv_series_id is not None else "fixture"
-    )
     grain_error = _bar_grain_input_error("xctx dry-run", args)
     if grain_error:
         return grain_error
     selected_identity = None
     if args.ticker:
-        if source_name != "live":
-            return _input_repair_error(
-                "xctx dry-run",
-                code="invalid_source_for_ticker",
-                what_failed="Ticker dry-run was requested with a non-live source.",
-                minimal_fix="Use --source live or omit --source when passing --ticker.",
-                suggested_inputs=[{"ticker": args.ticker, "source": "live"}],
-            )
         api_key = args.api_key or os.environ.get("MASSIVE_API_KEY")
         if not api_key:
             return _missing_api_key_error("xctx dry-run", purpose="live ticker dry-run")
@@ -981,16 +870,6 @@ def _dry_run(
             reads.append("env:MASSIVE_API_KEY")
         request_log = _request_log(client)
     elif args.ohlcv_series_id is not None:
-        if source_name != "live":
-            return _input_repair_error(
-                "xctx dry-run",
-                code="invalid_source_for_ohlcv_series_id",
-                what_failed="OHLCV series ID dry-run was requested with a non-live source.",
-                minimal_fix="Use --source live or omit --source when passing --ohlcv-series-id.",
-                suggested_inputs=[
-                    {"ohlcv_series_id": args.ohlcv_series_id, "source": "live"}
-                ],
-            )
         if not args.db:
             return _input_repair_error(
                 "xctx dry-run",
@@ -1032,52 +911,12 @@ def _dry_run(
             reads.append("env:MASSIVE_API_KEY")
         request_log = _request_log(client)
         selected_identity = _reference_snapshot_identity_payload(snapshot)
-    else:
-        fixture = _load_fixture(args.fixture, command="xctx dry-run")
-        if source_name == "fixture":
-            source = StaticBackfillEvidenceSource.from_legacy_plan(
-                fixture,
-                include_candidate_segments=False,
-                defer_kinds=tuple(args.defer_kind),
-            )
-            trace = run_backfill_source_dry_run_trace(
-                source, max_rounds=args.max_rounds
-            )
-            reads = [args.fixture, "fixture.seed_facts", "fixture.supplemental_facts"]
-            request_log = []
-        else:
-            api_key = args.api_key or os.environ.get("MASSIVE_API_KEY")
-            if not api_key:
-                return _missing_api_key_error(
-                    "xctx dry-run", purpose="live fixture dry-run"
-                )
-            source, client = massive_live_dry_run_source_from_legacy_plan(
-                fixture,
-                api_key=api_key,
-                base_url=args.base_url,
-            )
-            trace = run_backfill_source_dry_run_trace(
-                source, max_rounds=args.max_rounds
-            )
-            reads = [
-                args.fixture,
-                "massive.ticker_events",
-                "massive.reference_boundary",
-                "massive.bar_probe",
-                "massive.identity_scan",
-                "massive.ticker_replacement",
-            ]
-            if not args.api_key:
-                reads.append("env:MASSIVE_API_KEY")
-            request_log = _request_log(client)
     envelope = result_envelope("xctx dry-run", trace.result)
     envelope["effects"] = _effects(reads=reads, writes=[])
     envelope["rounds"] = _rounds(trace.rounds)
     envelope["request_log"] = request_log
     if selected_identity is not None:
         envelope["selected_identity"] = selected_identity
-    if isinstance(trace.result, BackfillPlan):
-        envelope["plan"] = legacy_plan_dict(trace.result)
     return envelope
 
 
@@ -3035,12 +2874,12 @@ def _bar_observation_next_actions(
         {
             "name": "inspect-series-execution-lineage",
             "kind": "command",
-                "command": {
-                    "name": "xctx observe",
-                    "description": "Inspect execution receipts linked to the direct bar lineage and selected series.",
-                    "args": {**db_args, "ohlcv_series_id": series_id, "limit": 5},
-                    "reads": [db],
-                    "writes": [],
+            "command": {
+                "name": "xctx observe",
+                "description": "Inspect execution receipts linked to the direct bar lineage and selected series.",
+                "args": {**db_args, "ohlcv_series_id": series_id, "limit": 5},
+                "reads": [db],
+                "writes": [],
             },
             "effects": [
                 {
@@ -3081,58 +2920,6 @@ def _bar_observation_next_actions(
             }
         )
     return actions
-
-
-def _next(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, Any]:
-    result = _plan_fixture_result(args.fixture, args.omit_kind, command="xctx next")
-    approval_argv = [
-        "./stock_universe.cli",
-        "xctx",
-        "validate",
-        "--fixture",
-        args.fixture,
-        "--approve-execution",
-    ]
-    execution_argv = [
-        "./stock_universe.cli",
-        "backfill",
-        "--fixture",
-        args.fixture,
-        "--strict",
-    ]
-    envelope = result_envelope(
-        "xctx next",
-        result,
-        execution_approved=args.approve_execution,
-        approval_argv=approval_argv,
-        approval_source_checkout_argv=approval_argv,
-        execution_argv=execution_argv,
-        execution_source_checkout_argv=execution_argv,
-    )
-    return {
-        "protocol_version": PROTOCOL_VERSION,
-        "ok": envelope["ok"],
-        "command": "xctx next",
-        "result_type": envelope["result_type"],
-        "status": envelope.get("status"),
-        "next_actions": envelope["next_actions"],
-        "effects": _effects(reads=[args.fixture], writes=[]),
-    }
-
-
-def _repair(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> dict[str, Any]:
-    result = _plan_fixture_result(args.fixture, args.omit_kind, command="xctx repair")
-    envelope = result_envelope("xctx repair", result)
-    return {
-        "protocol_version": PROTOCOL_VERSION,
-        "ok": bool(envelope.get("repairs")),
-        "command": "xctx repair",
-        "result_type": envelope["result_type"],
-        "repairs": envelope.get("repairs", []),
-        "effects": _effects(reads=[args.fixture], writes=[]),
-    }
 
 
 def _observe(
@@ -3709,27 +3496,35 @@ def _example_catalog(parser: argparse.ArgumentParser) -> list[dict[str, Any]]:
             "side_effects": {"writes": [], "mutates": False},
         },
         {
-            "name": "offline-fixture-dry-run",
+            "name": "dry-run-live-ticker",
             "command": "xctx dry-run",
             "argv": base
             + [
                 "dry-run",
-                "--fixture",
-                "tests/fixtures/legacy_plans/simple_current_sfbc.json",
+                "--ticker",
+                "NVDA",
+                "--bar-grain",
+                "1d",
+                "--max-rounds",
+                str(DEFAULT_MAX_ROUNDS),
             ],
             "source_checkout_argv": [
                 "./stock_universe.cli",
                 "xctx",
                 "dry-run",
-                "--fixture",
-                "tests/fixtures/legacy_plans/simple_current_sfbc.json",
+                "--ticker",
+                "NVDA",
+                "--bar-grain",
+                "1d",
+                "--max-rounds",
+                str(DEFAULT_MAX_ROUNDS),
             ],
             "structured_input": {
-                "fixture": "tests/fixtures/legacy_plans/simple_current_sfbc.json",
-                "source": "fixture",
+                "ticker": "NVDA",
+                "bar_grain": "1d",
                 "max_rounds": DEFAULT_MAX_ROUNDS,
             },
-            "what_it_teaches": "Planner result envelope, decisions, effects, rounds, and valid next actions.",
+            "what_it_teaches": "Live ticker-seeded planner envelope, provider reads, decisions, rounds, and concrete execution actions.",
             "side_effects": {"writes": [], "mutates": False},
         },
         {
@@ -3824,59 +3619,6 @@ def _example_catalog(parser: argparse.ArgumentParser) -> list[dict[str, Any]]:
             ],
             "structured_input": {"limit": 3},
             "what_it_teaches": "Recent catch-up run state, target counts, completion counts, stop state, and latest status action.",
-            "side_effects": {"writes": [], "mutates": False},
-        },
-        {
-            "name": "inspect-next-actions",
-            "command": "xctx next",
-            "argv": base
-            + [
-                "next",
-                "--fixture",
-                "tests/fixtures/legacy_plans/simple_current_sfbc.json",
-            ],
-            "source_checkout_argv": [
-                "./stock_universe.cli",
-                "xctx",
-                "next",
-                "--fixture",
-                "tests/fixtures/legacy_plans/simple_current_sfbc.json",
-            ],
-            "structured_input": {
-                "fixture": "tests/fixtures/legacy_plans/simple_current_sfbc.json"
-            },
-            "what_it_teaches": "The valid next transition before execution is exposed.",
-            "side_effects": {"writes": [], "mutates": False},
-        },
-        {
-            "name": "repair-missing-evidence",
-            "command": "xctx repair",
-            "argv": base
-            + [
-                "repair",
-                "--fixture",
-                "tests/fixtures/legacy_plans/barrick_gold_b.json",
-                "--omit-kind",
-                "candidate_segments",
-                "--omit-kind",
-                "alias_history",
-            ],
-            "source_checkout_argv": [
-                "./stock_universe.cli",
-                "xctx",
-                "repair",
-                "--fixture",
-                "tests/fixtures/legacy_plans/barrick_gold_b.json",
-                "--omit-kind",
-                "candidate_segments",
-                "--omit-kind",
-                "alias_history",
-            ],
-            "structured_input": {
-                "fixture": "tests/fixtures/legacy_plans/barrick_gold_b.json",
-                "omit_kind": ["candidate_segments", "alias_history"],
-            },
-            "what_it_teaches": "Repair actions for blocked or incomplete evidence.",
             "side_effects": {"writes": [], "mutates": False},
         },
         {
@@ -4025,6 +3767,99 @@ def _example_catalog(parser: argparse.ArgumentParser) -> list[dict[str, Any]]:
                 "strict": True,
             },
             "what_it_teaches": "Explicit execution boundary for a bounded persisted reference selection.",
+            "side_effects": {
+                "writes": [canonical_db_text()],
+                "mutates": True,
+                "requires_approval": True,
+            },
+        },
+        {
+            "name": "rehearse-reference-all-pages",
+            "command": "stock-universe backfill-reference-batch",
+            "argv": [
+                "stock-universe",
+                "backfill-reference-batch",
+                "--exchange",
+                "XNAS",
+                "--market",
+                "stocks",
+                "--bar-grain",
+                "1d",
+                "--page-size",
+                "1000",
+                "--all-pages",
+            ],
+            "source_checkout_argv": [
+                "./stock_universe.cli",
+                "backfill-reference-batch",
+                "--exchange",
+                "XNAS",
+                "--market",
+                "stocks",
+                "--bar-grain",
+                "1d",
+                "--page-size",
+                "1000",
+                "--all-pages",
+            ],
+            "structured_input": {
+                "exchange": "XNAS",
+                "market": "stocks",
+                "bar_grain": "1d",
+                "limit": 1000,
+                "all_pages": True,
+                "commit": False,
+            },
+            "what_it_teaches": "A full internally-paged read manifest for an exchange/market/bar-grain selection.",
+            "side_effects": {
+                "writes": [],
+                "mutates": False,
+                "requires_approval": False,
+            },
+        },
+        {
+            "name": "commit-reference-all-pages",
+            "command": "stock-universe backfill-reference-batch",
+            "argv": [
+                "stock-universe",
+                "backfill-reference-batch",
+                "--exchange",
+                "XNAS",
+                "--market",
+                "stocks",
+                "--bar-grain",
+                "1d",
+                "--page-size",
+                "1000",
+                "--all-pages",
+                "--commit",
+                "--strict",
+            ],
+            "source_checkout_argv": [
+                "./stock_universe.cli",
+                "backfill-reference-batch",
+                "--exchange",
+                "XNAS",
+                "--market",
+                "stocks",
+                "--bar-grain",
+                "1d",
+                "--page-size",
+                "1000",
+                "--all-pages",
+                "--commit",
+                "--strict",
+            ],
+            "structured_input": {
+                "exchange": "XNAS",
+                "market": "stocks",
+                "bar_grain": "1d",
+                "limit": 1000,
+                "all_pages": True,
+                "commit": True,
+                "strict": True,
+            },
+            "what_it_teaches": "The execution boundary for a full internally-paged exchange backfill.",
             "side_effects": {
                 "writes": [canonical_db_text()],
                 "mutates": True,
@@ -4374,65 +4209,6 @@ def _compose(
         "known_recipes": sorted(recipe["name"] for recipe in all_recipes),
         "effects": _effects(reads=[], writes=[]),
     }
-
-
-def _plan_fixture_result(
-    fixture_path: str,
-    omit_kinds: list[str],
-    *,
-    command: str = "xctx fixture",
-) -> BackfillPlan | EvidenceNeeded:
-    ledger = ledger_from_legacy_plan(_load_fixture(fixture_path, command=command))
-    if omit_kinds:
-        omitted = set(omit_kinds)
-        ledger = EvidenceLedger(
-            tuple(fact for fact in ledger.facts if fact.kind not in omitted)
-        )
-    return plan_backfill(ledger.snapshot())
-
-
-def _load_fixture(fixture_path: str, *, command: str) -> dict[str, Any]:
-    path = Path(fixture_path)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise XctxCliError(
-            _input_repair_error(
-                command,
-                code="fixture_not_found",
-                what_failed=f"Fixture file path was absent: {fixture_path}",
-                minimal_fix="Pass an existing fixture path or use xctx examples to copy a known-good fixture command.",
-                suggested_inputs=[
-                    {"fixture": "tests/fixtures/legacy_plans/simple_current_sfbc.json"}
-                ],
-                reads=[fixture_path],
-            )
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise XctxCliError(
-            _input_repair_error(
-                command,
-                code="fixture_json_invalid",
-                what_failed=f"Fixture file has invalid JSON: {fixture_path}",
-                minimal_fix="Fix the JSON syntax or pass a valid legacy plan fixture.",
-                suggested_inputs=[
-                    {"fixture": "tests/fixtures/legacy_plans/simple_current_sfbc.json"}
-                ],
-                reads=[fixture_path],
-                detail=str(exc),
-            )
-        ) from exc
-    except OSError as exc:
-        raise XctxCliError(
-            _input_repair_error(
-                command,
-                code="fixture_read_failed",
-                what_failed=f"Fixture file was unreadable: {fixture_path}",
-                minimal_fix="Check file permissions and pass a readable fixture path.",
-                reads=[fixture_path],
-                detail=str(exc),
-            )
-        ) from exc
 
 
 def _effects(*, reads: list[str], writes: list[str]) -> dict[str, list[str]]:

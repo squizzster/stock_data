@@ -1,4 +1,4 @@
-"""Compatibility re-exports for Massive provider helper functions."""
+"""Shared Massive provider helper exports."""
 
 from __future__ import annotations
 
